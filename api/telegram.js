@@ -13,35 +13,19 @@ async function enviarTelegram(chatId, text) {
 }
 
 export default async function handler(req, res) {
-  // Aseguramos responder 200 OK siempre para que Vercel no marque error 500
-  if (req.method !== "POST") {
-    return res.status(200).send("OK");
-  }
+  if (req.method !== "POST") return res.status(200).send("OK");
 
   const update = req.body || {};
   const text = update.message?.text;
   const chatId = update.message?.chat?.id;
 
-  if (!text || !chatId) {
-    return res.status(200).send("OK");
-  }
-
-  // Validación 1: ¿Existe la API Key de Gemini?
-  if (!process.env.GEMINI_API_KEY) {
-    await enviarTelegram(chatId, "⚠️ Error: No se encontró la variable GEMINI_API_KEY en Vercel.");
-    return res.status(200).send("OK");
-  }
-
-  // Validación 2: ¿Existe el BOT_TOKEN?
-  if (!process.env.BOT_TOKEN) {
-    console.error("Falta BOT_TOKEN");
-    return res.status(200).send("OK");
-  }
+  if (!text || !chatId) return res.status(200).send("OK");
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    // Usamos gemini-2.5-flash (el estándar actual rápido y gratuito)
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: { responseMimeType: "application/json" }
     });
 
