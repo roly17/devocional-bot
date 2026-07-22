@@ -5,7 +5,8 @@ const redis = Redis.fromEnv();
 
 async function enviarTelegram(chatId, text) {
   try {
-    await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
+    const token = process.env.BOT_TOKEN;
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text }),
@@ -25,7 +26,7 @@ export default async function handler(req, res) {
   if (!text || !chatId) return res.status(200).send("OK");
 
   try {
-    // 1. Llamada a Gemini
+    // 1. IA con Gemini
     const ai = new GoogleGenAI({});
     const prompt = `
 Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
@@ -59,13 +60,14 @@ DEVOCIONAL:
     const draftId = `draft_${Date.now()}`;
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // 3. Crear enlace de la imagen
+    // 3. Crear enlace dinámico de la imagen
     const host = req.headers.host || "devocional-bot-eosin.vercel.app";
     const protocol = host.includes("localhost") ? "http" : "https";
     const imageUrl = `${protocol}://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
 
-    // 4. Intentar enviar foto
-    const resTelegram = await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendPhoto`, {
+    // 4. Enviar la foto a Telegram usando la URL corregida
+    const token = process.env.BOT_TOKEN;
+    const resTelegram = await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){token}/sendPhoto`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -86,20 +88,22 @@ DEVOCIONAL:
 
     const dataTelegram = await resTelegram.json();
 
-    // Si Telegram rechazó la foto (por ejemplo, si la imagen no cargó), enviamos el mensaje por texto con la URL
+    // Si Telegram no pudo renderizar la foto por la URL, se envía como respaldo por texto
     if (!dataTelegram.ok) {
       await enviarTelegram(
         chatId,
-        `⚠️ Telegram no pudo cargar la imagen directametne.\n\n` +
-        `📌 *${contenido.titulo}*\n📖 ${contenido.versiculo}\n\n✍️ ${contenido.copy}\n\n` +
-        `🔗 Puedes ver la imagen generada aquí:\n${imageUrl}`
+        `📌 *${contenido.titulo}*\n📖 "${contenido.versiculo}"\n\n✍️ ${contenido.copy}\n\n` +
+        `🖼️ *Imagen generada:* ${imageUrl}`
       );
     }
 
   } catch (err) {
     console.error("Error en handler:", err);
-    await enviarTelegram(chatId, `🚨 Error de ejecución en Vercel:\n${err.stack || err.message}`);
+    await enviarTelegram(chatId, `🚨 Error de ejecución:\n${err.message}`);
   }
+
+  return res.status(200).send("OK");
+}
 
   return res.status(200).send("OK");
 }
