@@ -3,12 +3,19 @@ import { Redis } from "@upstash/redis";
 
 const redis = Redis.fromEnv();
 
-// URL base de Telegram fragmentada para evitar que GitHub o el navegador le apliquen formato Markdown al copiar/pegar
 const TG_DOMAIN = "api.telegram.org";
 const TG_BASE = "https://" + TG_DOMAIN + "/bot";
 
-// Función auxiliar para enviar respuestas a Telegram
-async function responderTelegram(chatId, text, token) {
+// Función para limpiar texto y evitar errores en HTML de Telegram
+function escapeHtml(text) {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function responderTelegram(chatId, htmlText, token) {
   if (!chatId || !token) return;
   const url = TG_BASE + token + "/sendMessage";
   try {
@@ -17,8 +24,8 @@ async function responderTelegram(chatId, text, token) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
-        text: text,
-        parse_mode: "Markdown"
+        text: htmlText,
+        parse_mode: "HTML"
       }),
     });
   } catch (e) {
@@ -34,8 +41,6 @@ export default async function handler(req, res) {
   const token = (process.env.BOT_TOKEN || "").trim();
   const update = req.body || {};
 
-  console.log("📥 Update recibido de Telegram:", JSON.stringify(update));
-
   // 1. Manejo de clics en botones (callback_query)
   if (update.callback_query) {
     const callbackId = update.callback_query.id;
@@ -49,7 +54,7 @@ export default async function handler(req, res) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ callback_query_id: callbackId, text: "Procesando..." }),
       });
-      await responderTelegram(chatId, "🔘 Presionaste el botón: `" + data + "`\n_(La integración de publicación automática en Facebook se activará en el Paso 3)_.", token);
+      await responderTelegram(chatId, "🔘 Presionaste el botón: <code>" + escapeHtml(data) + "</code>\n<i>(La publicación automática en Facebook se activará en el Paso 3)</i>.", token);
     }
     return res.status(200).send("OK");
   }
@@ -59,20 +64,18 @@ export default async function handler(req, res) {
 
   if (!chatId) return res.status(200).send("OK");
 
-  // Si envían algo que no sea texto
   if (!text) {
-    await responderTelegram(chatId, "📌 Por favor envíame el *texto* de un devocional diario para procesarlo.", token);
+    await responderTelegram(chatId, "📌 Por favor envíame el <b>texto</b> de un devocional diario para procesarlo.", token);
     return res.status(200).send("OK");
   }
 
   if (!token) {
-    console.error("❌ BOT_TOKEN no configurado en Vercel.");
     return res.status(200).send("OK");
   }
 
   try {
-    // 2. Respuesta inmediata de confirmación
-    await responderTelegram(chatId, "⏳ *Procesando tu devocional con Inteligencia Artificial...*", token);
+    // 2. Respuesta inmediata
+    await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Inteligencia Artificial...</b>", token);
 
     // 3. Procesamiento con Gemini AI
     const ai = new GoogleGenAI({});
@@ -87,7 +90,7 @@ export default async function handler(req, res) {
       'DEVOCIONAL:\n"""' + text + '"""';
 
     const interaction = await ai.interactions.create({
-      model: "gemini-3.6-flash",
+      model: "gemini-2.5-flash",
       input: prompt,
       response_format: {
         type: "text",
@@ -103,13 +106,15 @@ export default async function handler(req, res) {
     const draftId = "draft_" + Date.now();
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // 5. Generar enlace para la imagen
+    // 5. Enlace de la imagen
     const host = req.headers.host || "devocional-bot-eosin.vercel.app";
     const imageUrl = "https://" + host + "/api/og?titulo=" + encodeURIComponent(contenido.titulo) + "&versiculo=" + encodeURIComponent(contenido.versiculo);
 
-    // 6. Enviar FOTO + TEXTO + BOTONES a Telegram
+    // 6. Enviar FOTO + CAPTION + BOTONES con formato HTML
     const sendPhotoUrl = TG_BASE + token + "/sendPhoto";
-    const captionText = "📌 *BORRADOR DE PUBLICACIÓN*\n\n✍️ *Texto para Facebook:*\n" + contenido.copy + "\n\n💾 _ID: " + draftId + "_";
+    const captionText = "📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n" +
+      "✍️ <b>Texto para Facebook:</b>\n" + escapeHtml(contenido.copy) + "\n\n" +
+      "💾 <i>ID: " + escapeHtml(draftId) + "</i>";
 
     const resTelegram = await fetch(sendPhotoUrl, {
       method: "POST",
@@ -118,7 +123,7 @@ export default async function handler(req, res) {
         chat_id: chatId,
         photo: imageUrl,
         caption: captionText,
-        parse_mode: "Markdown",
+        parse_mode: "HTML",
         reply_markup: {
           inline_keyboard: [
             [
@@ -132,18 +137,18 @@ export default async function handler(req, res) {
 
     const dataTelegram = await resTelegram.json();
 
-    // Si Telegram no pudo enviar la foto directamente, envía el borrador en texto plano de respaldo
+    // Respaldo en texto por si ocurre cualquier problema de red con la foto
     if (!dataTelegram.ok) {
-      const fallbackMsg = "⚠️ *No se pudo adjuntar la foto directamente.* (" + dataTelegram.description + ")\n\n" +
-        "📌 *" + contenido.titulo + "*\n📖 \"" + contenido.versiculo + "\"\n\n✍️ " + contenido.copy + "\n\n" +
-        "🖼️ *Abre tu imagen generada aquí:* " + imageUrl;
+      const fallbackMsg = "⚠️ <b>No se pudo adjuntar la foto directamente.</b> (" + escapeHtml(dataTelegram.description) + ")\n\n" +
+        "📌 <b>" + escapeHtml(contenido.titulo) + "</b>\n📖 \"" + escapeHtml(contenido.versiculo) + "\"\n\n✍️ " + escapeHtml(contenido.copy) + "\n\n" +
+        "🖼️ <a href=\"" + imageUrl + "\">Abre tu imagen generada aquí</a>";
       
       await responderTelegram(chatId, fallbackMsg, token);
     }
 
   } catch (err) {
     console.error("❌ Error en el proceso:", err);
-    await responderTelegram(chatId, "🚨 *Error en el servidor:*\n`" + err.message + "`", token);
+    await responderTelegram(chatId, "🚨 <b>Error en el servidor:</b>\n<code>" + escapeHtml(err.message) + "</code>", token);
   }
 
   return res.status(200).send("OK");
