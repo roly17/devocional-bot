@@ -3,11 +3,14 @@ import { Redis } from "@upstash/redis";
 
 const redis = Redis.fromEnv();
 
-// Función auxiliar robusta para enviar respuestas simples por mensaje de texto
+// Envío de mensajes de texto simple / fallback
 async function enviarTelegramBackup(chatId, text) {
-  const token = process.env.BOT_TOKEN;
+  const token = (process.env.BOT_TOKEN || "").trim();
+  if (!token) return;
+
+  const url = "https://api.telegram.org/bot" + token + "/sendMessage";
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
@@ -27,7 +30,12 @@ export default async function handler(req, res) {
   if (!text || !chatId) return res.status(200).send("OK");
 
   try {
-    // 1. Llamada a Gemini
+    const token = (process.env.BOT_TOKEN || "").trim();
+    if (!token) {
+      throw new Error("La variable BOT_TOKEN no está configurada correctamente en Vercel.");
+    }
+
+    // 1. Llamada a Gemini AI
     const ai = new GoogleGenAI({});
     const prompt = `
 Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
@@ -61,14 +69,14 @@ DEVOCIONAL:
     const draftId = `draft_${Date.now()}`;
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // 3. Construir enlace de la imagen con codificación robusta
+    // 3. Construir enlace de la imagen
     const host = req.headers.host || "devocional-bot-eosin.vercel.app";
-    // Usamos encodeURIComponent para asegurar que los espacios o caracteres especiales no rompan la URL
-    const imageUrl = `https://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
+    const imageUrl = "https://" + host + "/api/og?titulo=" + encodeURIComponent(contenido.titulo) + "&versiculo=" + encodeURIComponent(contenido.versiculo);
 
-    // 4. Intentar enviar la FOTO + CAPTION + BOTONES a Telegram
-    const token = process.env.BOT_TOKEN;
-    const resTelegram = await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){token}/sendPhoto`, {
+    // 4. Enviar Foto a Telegram
+    const sendPhotoUrl = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + token + "/sendPhoto";
+    
+    const resTelegram = await fetch(sendPhotoUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -89,22 +97,19 @@ DEVOCIONAL:
 
     const dataTelegram = await resTelegram.json();
 
-    // ⚠️ CRÍTICO: Si Telegram rechazó la foto (por ejemplo, por tiempo de descarga o URL malformada),
-    // enviamos el borrador por texto para no perderlo y diagnosticar el problema de la imagen.
+    // Si Telegram no pudo cargar la imagen por URL, envía una respuesta textual de respaldo
     if (!dataTelegram.ok) {
       await enviarTelegramBackup(
         chatId,
-        `⚠️ *No se pudo enviar la imagen generada directamente.* Telegram rechazó la foto.\n\n` +
-        `📝 *Detalles del error:* ${dataTelegram.description}\n\n` +
-        `📌 *${contenido.titulo}*\n\n📖 "${contenido.versiculo}"\n\n✍️ ${contenido.copy}\n\n` +
-        `🔗 *Prueba la imagen generada aquí (clic para abrir):* ${imageUrl}`
+        `⚠️ *No se pudo enviar la imagen.* Telegram respondió:\n\`${dataTelegram.description}\`\n\n` +
+        `📌 *${contenido.titulo}*\n📖 "${contenido.versiculo}"\n\n✍️ ${contenido.copy}\n\n` +
+        `🔗 *Prueba la imagen aquí:* ${imageUrl}`
       );
     }
 
   } catch (err) {
     console.error("Error en handler:", err);
-    // En caso de un fallo interno en Vercel (IA, Redis), enviamos el error exacto
-    await enviarTelegramBackup(chatId, `🚨 *Error de ejecución en Vercel:*\n${err.stack || err.message}`);
+    await enviarTelegramBackup(chatId, `🚨 *Error de ejecución:*\n${err.message}`);
   }
 
   return res.status(200).send("OK");
