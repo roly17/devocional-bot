@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { Redis } from "@upstash/redis";
 
-// Conexión automática a Upstash Redis usando las variables de Vercel
+// Conexión a Redis usando variables de entorno de Upstash o KV de Vercel
 const redis = Redis.fromEnv();
 
 async function enviarTelegram(chatId, text) {
@@ -61,12 +61,20 @@ DEVOCIONAL:
     // ==========================================
     const draftId = `draft_${Date.now()}`;
     
-    // 1. Guardar el borrador en Redis por 1 hora (3600s)
-    await redis.set(draftId, contenido, { ex: 3600 });
+    // Guardar el borrador en Redis por 1 hora (3600 segundos)
+    await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // 2. Leer el borrador recién guardado
-    const borradorGuardado = await redis.get(draftId);
+    // Leer el borrador recién guardado
+    const rawBorrador = await redis.get(draftId);
+    
+    // Convertir respuesta si viene como string JSON
+    const borradorGuardado = typeof rawBorrador === "string" ? JSON.parse(rawBorrador) : rawBorrador;
     // ==========================================
+
+    if (!borradorGuardado || !borradorGuardado.titulo) {
+      await enviarTelegram(chatId, "⚠️ Error: No se pudo recuperar el borrador desde Redis. Revisa la conexión de la base de datos.");
+      return res.status(200).send("OK");
+    }
 
     const mensajeFinal = `📌 ${borradorGuardado.titulo.toUpperCase()}\n\n📖 "${borradorGuardado.versiculo}"\n\n✍️ ${borradorGuardado.copy}\n\n💾 *(Borrador guardado con éxito en Redis - ID: ${draftId})*`;
 
