@@ -3,9 +3,9 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 async function generarContenido(devocional) {
-  // Usamos gemini-1.5-flash y forzamos a que Gemini entregue JSON puro
+  // Cambiado a gemini-2.0-flash que es la versión actual activa
   const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash",
+    model: "gemini-2.0-flash",
     generationConfig: { responseMimeType: "application/json" }
   });
 
@@ -22,14 +22,14 @@ DEVOCIONAL:
   const result = await model.generateContent(prompt);
   let raw = result.response.text().trim();
   
-  // Limpieza de seguridad por si Gemini incluye marcas de formato markdown ```
+  // Limpieza de formato por si viene empaquetado en código
   raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
   
   return JSON.parse(raw);
 }
 
 async function enviarTelegram(chatId, text) {
-  await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
+  await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
@@ -50,7 +50,6 @@ export default async function handler(req, res) {
       );
     } catch (err) {
       console.error(err);
-      // Si falla, ahora nos dirá la razón exacta en el chat
       await enviarTelegram(chatId, `⚠️ Error: ${err.message}`);
     }
   }
