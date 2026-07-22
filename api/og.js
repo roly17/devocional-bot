@@ -11,10 +11,9 @@ export default async function handler(req) {
     const titulo = searchParams.get('titulo') || 'DEVOCIONAL DIARIO';
     const versiculo = searchParams.get('versiculo') || '';
 
-    // Construcción de la URL base del sitio
-    const host = req.headers.get('host') || '';
-    const protocol = host.includes('localhost') ? 'http' : 'https';
-    const baseUrl = `${protocol}://${host}`;
+    // Dominio público de Vercel para cargar las imágenes estáticas
+    const host = req.headers.get('host') || 'devocional-bot-eosin.vercel.app';
+    const baseUrl = `https://${host}`;
 
     return new ImageResponse(
       (
@@ -31,7 +30,7 @@ export default async function handler(req) {
             fontFamily: 'sans-serif',
           }}
         >
-          {/* Esquina superior izquierda: Logo */}
+          {/* Logo en la esquina superior izquierda */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <img
               src={`${baseUrl}/logo.png`}
@@ -43,7 +42,7 @@ export default async function handler(req) {
             />
           </div>
 
-          {/* Bloque Central: Contenido */}
+          {/* Bloque Central de Texto */}
           <div
             style={{
               display: 'flex',
@@ -53,13 +52,13 @@ export default async function handler(req) {
               textAlign: 'center',
               padding: '30px',
               borderRadius: '20px',
-              backgroundColor: 'rgba(20, 10, 5, 0.45)',
-              border: '1px solid rgba(255, 213, 79, 0.2)',
+              backgroundColor: 'rgba(20, 10, 5, 0.50)',
+              border: '1px solid rgba(255, 213, 79, 0.25)',
             }}
           >
             <h2
               style={{
-                fontSize: '32px',
+                fontSize: '34px',
                 fontWeight: 'bold',
                 color: '#FFD54F',
                 letterSpacing: '2px',
@@ -72,7 +71,7 @@ export default async function handler(req) {
 
             <p
               style={{
-                fontSize: '24px',
+                fontSize: '26px',
                 fontWeight: '500',
                 lineHeight: '1.4',
                 color: '#FFFFFF',
@@ -83,7 +82,7 @@ export default async function handler(req) {
             </p>
           </div>
 
-          {/* Marca inferior */}
+          {/* Firma inferior */}
           <div
             style={{
               display: 'flex',
