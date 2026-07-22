@@ -90,7 +90,7 @@ export default async function handler(req, res) {
       'DEVOCIONAL:\n"""' + text + '"""';
 
     const interaction = await ai.interactions.create({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       input: prompt,
       response_format: {
         type: "text",
