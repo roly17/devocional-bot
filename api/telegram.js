@@ -3,10 +3,14 @@ import { Redis } from "@upstash/redis";
 
 const redis = Redis.fromEnv();
 
+// URL base de Telegram fragmentada para evitar que GitHub o el navegador le apliquen formato Markdown al copiar/pegar
+const TG_DOMAIN = "api.telegram.org";
+const TG_BASE = "https://" + TG_DOMAIN + "/bot";
+
 // Función auxiliar para enviar respuestas a Telegram
 async function responderTelegram(chatId, text, token) {
   if (!chatId || !token) return;
-  const url = "https://api.telegram.org/bot" + token + "/sendMessage";
+  const url = TG_BASE + token + "/sendMessage";
   try {
     await fetch(url, {
       method: "POST",
@@ -39,7 +43,7 @@ export default async function handler(req, res) {
     const chatId = update.callback_query.message?.chat?.id;
 
     if (token) {
-      const cbUrl = "https://api.telegram.org/bot" + token + "/answerCallbackQuery";
+      const cbUrl = TG_BASE + token + "/answerCallbackQuery";
       await fetch(cbUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -55,7 +59,7 @@ export default async function handler(req, res) {
 
   if (!chatId) return res.status(200).send("OK");
 
-  // Si envían una imagen, sticker o mensaje de voz en lugar de texto
+  // Si envían algo que no sea texto
   if (!text) {
     await responderTelegram(chatId, "📌 Por favor envíame el *texto* de un devocional diario para procesarlo.", token);
     return res.status(200).send("OK");
@@ -67,7 +71,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 2. Feedback inmediato al usuario
+    // 2. Respuesta inmediata de confirmación
     await responderTelegram(chatId, "⏳ *Procesando tu devocional con Inteligencia Artificial...*", token);
 
     // 3. Procesamiento con Gemini AI
@@ -95,16 +99,16 @@ export default async function handler(req, res) {
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
-    // 4. Guardar en Upstash Redis
+    // 4. Guardar borrador en Upstash Redis
     const draftId = "draft_" + Date.now();
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // 5. Construir URL de la imagen generada
+    // 5. Generar enlace para la imagen
     const host = req.headers.host || "devocional-bot-eosin.vercel.app";
     const imageUrl = "https://" + host + "/api/og?titulo=" + encodeURIComponent(contenido.titulo) + "&versiculo=" + encodeURIComponent(contenido.versiculo);
 
-    // 6. Enviar FOTO + CAPTION + BOTONES a Telegram
-    const sendPhotoUrl = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + token + "/sendPhoto";
+    // 6. Enviar FOTO + TEXTO + BOTONES a Telegram
+    const sendPhotoUrl = TG_BASE + token + "/sendPhoto";
     const captionText = "📌 *BORRADOR DE PUBLICACIÓN*\n\n✍️ *Texto para Facebook:*\n" + contenido.copy + "\n\n💾 _ID: " + draftId + "_";
 
     const resTelegram = await fetch(sendPhotoUrl, {
@@ -128,7 +132,7 @@ export default async function handler(req, res) {
 
     const dataTelegram = await resTelegram.json();
 
-    // Respaldos por si Telegram no pudo renderizar la foto automáticamente
+    // Si Telegram no pudo enviar la foto directamente, envía el borrador en texto plano de respaldo
     if (!dataTelegram.ok) {
       const fallbackMsg = "⚠️ *No se pudo adjuntar la foto directamente.* (" + dataTelegram.description + ")\n\n" +
         "📌 *" + contenido.titulo + "*\n📖 \"" + contenido.versiculo + "\"\n\n✍️ " + contenido.copy + "\n\n" +
