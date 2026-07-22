@@ -21,9 +21,12 @@ export default async function handler(req, res) {
 
   if (!text || !chatId) return res.status(200).send("OK");
 
+  const apiKey = process.env.GEMINI_API_KEY || "";
+  // Tomamos los primeros 6 y últimos 4 caracteres para identificar la clave sin exponerla completa
+  const pistaClave = apiKey ? `${apiKey.substring(0, 6)}...${apiKey.slice(-4)}` : "NINGUNA";
+
   try {
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    // Modelo oficial rápido y compatible
+    const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.0-flash",
       generationConfig: { responseMimeType: "application/json" }
@@ -50,7 +53,8 @@ DEVOCIONAL:
 
   } catch (err) {
     console.error("Error en el proceso:", err);
-    await enviarTelegram(chatId, `⚠️ Error en Gemini: ${err.message}`);
+    // Nos dirá el error Y la clave que se usó
+    await enviarTelegram(chatId, `⚠️ Error en Gemini (Clave usada: ${pistaClave}):\n${err.message}`);
   }
 
   return res.status(200).send("OK");
