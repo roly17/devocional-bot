@@ -3,6 +3,18 @@ import { Redis } from "@upstash/redis";
 
 const redis = Redis.fromEnv();
 
+async function enviarTelegram(chatId, text) {
+  try {
+    await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch (e) {
+    console.error("Error enviando mensaje simple:", e);
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(200).send("OK");
 
@@ -13,8 +25,8 @@ export default async function handler(req, res) {
   if (!text || !chatId) return res.status(200).send("OK");
 
   try {
+    // 1. Llamada a Gemini
     const ai = new GoogleGenAI({});
-
     const prompt = `
 Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
 
@@ -43,23 +55,23 @@ DEVOCIONAL:
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
-    // 1. Guardar borrador en Redis
+    // 2. Guardar borrador en Redis
     const draftId = `draft_${Date.now()}`;
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // 2. Construir la URL de la imagen en Vercel
-    const host = req.headers.host;
+    // 3. Crear enlace de la imagen
+    const host = req.headers.host || "devocional-bot-eosin.vercel.app";
     const protocol = host.includes("localhost") ? "http" : "https";
     const imageUrl = `${protocol}://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
 
-    // 3. Enviar la FOTO + CAPTION + BOTONES a Telegram
-    await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendPhoto`, {
+    // 4. Intentar enviar foto
+    const resTelegram = await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendPhoto`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: chatId,
         photo: imageUrl,
-        caption: `📌 *BORRADOR DE PUBLICACIÓN*\n\n✍️ *Texto para Facebook:*\n${contenido.copy}\n\n💾 _ID del borrador: ${draftId}_`,
+        caption: `📌 *BORRADOR DE PUBLICACIÓN*\n\n✍️ *Texto para Facebook:*\n${contenido.copy}\n\n💾 _ID: ${draftId}_`,
         parse_mode: "Markdown",
         reply_markup: {
           inline_keyboard: [
@@ -72,13 +84,21 @@ DEVOCIONAL:
       }),
     });
 
+    const dataTelegram = await resTelegram.json();
+
+    // Si Telegram rechazó la foto (por ejemplo, si la imagen no cargó), enviamos el mensaje por texto con la URL
+    if (!dataTelegram.ok) {
+      await enviarTelegram(
+        chatId,
+        `⚠️ Telegram no pudo cargar la imagen directametne.\n\n` +
+        `📌 *${contenido.titulo}*\n📖 ${contenido.versiculo}\n\n✍️ ${contenido.copy}\n\n` +
+        `🔗 Puedes ver la imagen generada aquí:\n${imageUrl}`
+      );
+    }
+
   } catch (err) {
-    console.error("Error en el proceso:", err);
-    await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: `⚠️ Error:\n${err.message}` }),
-    });
+    console.error("Error en handler:", err);
+    await enviarTelegram(chatId, `🚨 Error de ejecución en Vercel:\n${err.stack || err.message}`);
   }
 
   return res.status(200).send("OK");
