@@ -1,20 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { Redis } from "@upstash/redis";
 
-// Conexión a Redis usando variables de entorno de Upstash o KV de Vercel
 const redis = Redis.fromEnv();
-
-async function enviarTelegram(chatId, text) {
-  try {
-    await fetch(`https://api.telegram.org/bot${process.env.BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
-    });
-  } catch (e) {
-    console.error("Error enviando mensaje a Telegram:", e);
-  }
-}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(200).send("OK");
@@ -56,33 +43,42 @@ DEVOCIONAL:
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
-    // ==========================================
-    // 🧪 PRUEBA DE MEMORIA EN REDIS
-    // ==========================================
+    // 1. Guardar borrador en Redis
     const draftId = `draft_${Date.now()}`;
-    
-    // Guardar el borrador en Redis por 1 hora (3600 segundos)
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // Leer el borrador recién guardado
-    const rawBorrador = await redis.get(draftId);
-    
-    // Convertir respuesta si viene como string JSON
-    const borradorGuardado = typeof rawBorrador === "string" ? JSON.parse(rawBorrador) : rawBorrador;
-    // ==========================================
+    // 2. Construir la URL de la imagen en Vercel
+    const host = req.headers.host;
+    const protocol = host.includes("localhost") ? "http" : "https";
+    const imageUrl = `${protocol}://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
 
-    if (!borradorGuardado || !borradorGuardado.titulo) {
-      await enviarTelegram(chatId, "⚠️ Error: No se pudo recuperar el borrador desde Redis. Revisa la conexión de la base de datos.");
-      return res.status(200).send("OK");
-    }
-
-    const mensajeFinal = `📌 ${borradorGuardado.titulo.toUpperCase()}\n\n📖 "${borradorGuardado.versiculo}"\n\n✍️ ${borradorGuardado.copy}\n\n💾 *(Borrador guardado con éxito en Redis - ID: ${draftId})*`;
-
-    await enviarTelegram(chatId, mensajeFinal);
+    // 3. Enviar la FOTO + CAPTION + BOTONES a Telegram
+    await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendPhoto`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        photo: imageUrl,
+        caption: `📌 *BORRADOR DE PUBLICACIÓN*\n\n✍️ *Texto para Facebook:*\n${contenido.copy}\n\n💾 _ID del borrador: ${draftId}_`,
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Publicar en Facebook", callback_data: `confirmar:${draftId}` },
+              { text: "❌ Cancelar", callback_data: `cancelar:${draftId}` }
+            ]
+          ]
+        }
+      }),
+    });
 
   } catch (err) {
     console.error("Error en el proceso:", err);
-    await enviarTelegram(chatId, `⚠️ Error en la prueba:\n${err.message}`);
+    await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: `⚠️ Error:\n${err.message}` }),
+    });
   }
 
   return res.status(200).send("OK");
