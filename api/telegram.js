@@ -1,4 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
+import { Redis } from "@upstash/redis";
+
+// Conexión automática a Upstash Redis usando las variables de Vercel
+const redis = Redis.fromEnv();
 
 async function enviarTelegram(chatId, text) {
   try {
@@ -22,8 +26,6 @@ export default async function handler(req, res) {
   if (!text || !chatId) return res.status(200).send("OK");
 
   try {
-    // 1. Inicializamos el nuevo cliente de la Interactions API
-    // Asume automáticamente la variable process.env.GEMINI_API_KEY
     const ai = new GoogleGenAI({});
 
     const prompt = `
@@ -41,29 +43,38 @@ DEVOCIONAL:
 """${text}"""
 `;
 
-    // 2. Usamos el modelo 3.6 con la nueva estructura que indica tu guía
     const interaction = await ai.interactions.create({
       model: "gemini-3.6-flash",
       input: prompt,
-      // La guía indica que podemos forzar el JSON usando response_format
       response_format: {
         type: "text",
         mime_type: "application/json"
       }
     });
 
-    // 3. Obtenemos el texto de salida usando la nueva propiedad
     let raw = interaction.output_text.trim();
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
-    
     const contenido = JSON.parse(raw);
-    const mensajeFinal = `📌 ${contenido.titulo.toUpperCase()}\n\n📖 "${contenido.versiculo}"\n\n✍️ ${contenido.copy}`;
+
+    // ==========================================
+    // 🧪 PRUEBA DE MEMORIA EN REDIS
+    // ==========================================
+    const draftId = `draft_${Date.now()}`;
+    
+    // 1. Guardar el borrador en Redis por 1 hora (3600s)
+    await redis.set(draftId, contenido, { ex: 3600 });
+
+    // 2. Leer el borrador recién guardado
+    const borradorGuardado = await redis.get(draftId);
+    // ==========================================
+
+    const mensajeFinal = `📌 ${borradorGuardado.titulo.toUpperCase()}\n\n📖 "${borradorGuardado.versiculo}"\n\n✍️ ${borradorGuardado.copy}\n\n💾 *(Borrador guardado con éxito en Redis - ID: ${draftId})*`;
 
     await enviarTelegram(chatId, mensajeFinal);
 
   } catch (err) {
     console.error("Error en el proceso:", err);
-    await enviarTelegram(chatId, `⚠️ Error en Gemini 3.6:\n${err.message}`);
+    await enviarTelegram(chatId, `⚠️ Error en la prueba:\n${err.message}`);
   }
 
   return res.status(200).send("OK");
