@@ -27,10 +27,15 @@ export default async function handler(req, res) {
     const ai = new GoogleGenAI({});
 
     const prompt = `
-Eres el community manager de una iglesia cristiana. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
-- "titulo": título corto y llamativo (máx 6 palabras)
-- "versiculo": la cita bíblica principal, corta y textual
-- "copy": texto para el post de Facebook (3-4 líneas, cálido, invita a leer/reflexionar, con 2-3 hashtags relevantes)
+Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
+
+- "titulo": título corto y llamativo (máx 6 palabras).
+- "versiculo": la cita bíblica principal del texto. OBLIGATORIO: La cita debe ser extraída EXACTAMENTE y textualmente de la Biblia versión Reina Valera 1960 (RVR1960).
+- "copy": texto para el post de Facebook (3-4 líneas, tono cálido, que invite a leer y reflexionar). 
+Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden: 
+1. Un hashtag sobre el tema principal del devocional (ej. #Fe, #Esperanza).
+2. #MMMLasPalmas
+3. #MMM
 
 DEVOCIONAL:
 """${text}"""
