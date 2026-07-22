@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "grammy": "^1.21.0",
-    "@google/genai": "latest"
+    "@google/genai": "latest",
+    "@upstash/redis": "latest"
   }
 }
