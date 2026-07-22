@@ -1,15 +1,15 @@
 import { ImageResponse } from '@vercel/og';
 
-export default async function handler(req) {
+export default async function handler(req, res) {
   try {
-    const requestUrl = new URL(req.url, 'https://devocional-bot-eosin.vercel.app');
-    const titulo = requestUrl.searchParams.get('titulo') || 'DEVOCIONAL DIARIO';
-    const versiculo = requestUrl.searchParams.get('versiculo') || '';
+    // 1. Obtener parámetros de la URL directamente desde req.query (Node.js)
+    const titulo = req.query.titulo || 'DEVOCIONAL DIARIO';
+    const versiculo = req.query.versiculo || '';
 
-    const host = req.headers?.get ? req.headers.get('host') : (req.headers?.host || 'devocional-bot-eosin.vercel.app');
+    const host = req.headers.host || 'devocional-bot-eosin.vercel.app';
     const baseUrl = `https://${host}`;
 
-    // Estructura visual definida en JavaScript puro
+    // 2. Definir la estructura visual en JavaScript puro
     const element = {
       type: 'div',
       props: {
@@ -117,11 +117,22 @@ export default async function handler(req) {
       },
     };
 
-    return new ImageResponse(element, {
+    // 3. Crear la respuesta de imagen
+    const imageResponse = new ImageResponse(element, {
       width: 1200,
       height: 630,
     });
+
+    // 4. Convertir la imagen a Buffer y enviarla correctamente por res
+    const arrayBuffer = await imageResponse.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.status(200).send(buffer);
+
   } catch (e) {
-    return new Response(`Error generando la imagen: ${e.message}`, { status: 500 });
+    console.error("Error en og.js:", e);
+    return res.status(500).send(`Error generando la imagen: ${e.message}`);
   }
 }
