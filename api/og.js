@@ -1,8 +1,6 @@
 import { ImageResponse } from '@vercel/og';
 
-export const config = {
-  runtime: 'edge',
-};
+export const runtime = 'edge';
 
 export default async function handler(req) {
   try {
@@ -11,7 +9,6 @@ export default async function handler(req) {
     const titulo = searchParams.get('titulo') || 'DEVOCIONAL DIARIO';
     const versiculo = searchParams.get('versiculo') || '';
 
-    // Dominio público de Vercel para cargar las imágenes estáticas
     const host = req.headers.get('host') || 'devocional-bot-eosin.vercel.app';
     const baseUrl = `https://${host}`;
 
@@ -30,7 +27,7 @@ export default async function handler(req) {
             fontFamily: 'sans-serif',
           }}
         >
-          {/* Logo en la esquina superior izquierda */}
+          {/* Logo */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <img
               src={`${baseUrl}/logo.png`}
@@ -42,7 +39,7 @@ export default async function handler(req) {
             />
           </div>
 
-          {/* Bloque Central de Texto */}
+          {/* Bloque Central */}
           <div
             style={{
               display: 'flex',
@@ -82,7 +79,7 @@ export default async function handler(req) {
             </p>
           </div>
 
-          {/* Firma inferior */}
+          {/* Firma */}
           <div
             style={{
               display: 'flex',
