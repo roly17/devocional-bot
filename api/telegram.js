@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
 async function enviarTelegram(chatId, text) {
   try {
@@ -21,16 +21,10 @@ export default async function handler(req, res) {
 
   if (!text || !chatId) return res.status(200).send("OK");
 
-  const apiKey = process.env.GEMINI_API_KEY || "";
-  // Tomamos los primeros 6 y últimos 4 caracteres para identificar la clave sin exponerla completa
-  const pistaClave = apiKey ? `${apiKey.substring(0, 6)}...${apiKey.slice(-4)}` : "NINGUNA";
-
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash",
-      generationConfig: { responseMimeType: "application/json" }
-    });
+    // 1. Inicializamos el nuevo cliente de la Interactions API
+    // Asume automáticamente la variable process.env.GEMINI_API_KEY
+    const ai = new GoogleGenAI({});
 
     const prompt = `
 Eres el community manager de una iglesia cristiana. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
@@ -42,8 +36,19 @@ DEVOCIONAL:
 """${text}"""
 `;
 
-    const result = await model.generateContent(prompt);
-    let raw = result.response.text().trim();
+    // 2. Usamos el modelo 3.6 con la nueva estructura que indica tu guía
+    const interaction = await ai.interactions.create({
+      model: "gemini-3.6-flash",
+      input: prompt,
+      // La guía indica que podemos forzar el JSON usando response_format
+      response_format: {
+        type: "text",
+        mime_type: "application/json"
+      }
+    });
+
+    // 3. Obtenemos el texto de salida usando la nueva propiedad
+    let raw = interaction.output_text.trim();
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     
     const contenido = JSON.parse(raw);
@@ -53,8 +58,7 @@ DEVOCIONAL:
 
   } catch (err) {
     console.error("Error en el proceso:", err);
-    // Nos dirá el error Y la clave que se usó
-    await enviarTelegram(chatId, `⚠️ Error en Gemini (Clave usada: ${pistaClave}):\n${err.message}`);
+    await enviarTelegram(chatId, `⚠️ Error en Gemini 3.6:\n${err.message}`);
   }
 
   return res.status(200).send("OK");
