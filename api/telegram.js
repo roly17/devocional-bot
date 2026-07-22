@@ -3,7 +3,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 async function generarContenido(devocional) {
-  // Cambiado a gemini-2.0-flash que es la versión actual activa
   const model = genAI.getGenerativeModel({ 
     model: "gemini-2.0-flash",
     generationConfig: { responseMimeType: "application/json" }
@@ -21,18 +20,16 @@ DEVOCIONAL:
 
   const result = await model.generateContent(prompt);
   let raw = result.response.text().trim();
-  
-  // Limpieza de formato por si viene empaquetado en código
   raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
-  
   return JSON.parse(raw);
 }
 
 async function enviarTelegram(chatId, text) {
+  // Le quitamos parse_mode para que Telegram acepten hashtags y símbolos sin rechazar el mensaje
   await fetch(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){process.env.BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
+    body: JSON.stringify({ chat_id: chatId, text }), 
   });
 }
 
@@ -44,10 +41,10 @@ export default async function handler(req, res) {
   if (text && chatId) {
     try {
       const contenido = await generarContenido(text);
-      await enviarTelegram(
-        chatId,
-        `*${contenido.titulo}*\n\n"${contenido.versiculo}"\n\n${contenido.copy}`
-      );
+      
+      const mensajeFinal = `📌 ${contenido.titulo.toUpperCase()}\n\n📖 "${contenido.versiculo}"\n\n✍️ ${contenido.copy}`;
+      
+      await enviarTelegram(chatId, mensajeFinal);
     } catch (err) {
       console.error(err);
       await enviarTelegram(chatId, `⚠️ Error: ${err.message}`);
