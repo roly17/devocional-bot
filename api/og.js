@@ -1,19 +1,23 @@
 import { ImageResponse } from '@vercel/og';
 
-export default async function handler(req) {
+export default async function handler(req, res) {
   try {
-    const { searchParams, host, protocol } = new URL(req.url);
+    // Construcción segura de URLs para Node.js
+    const host = req.headers.host || 'devocional-bot-eosin.vercel.app';
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const requestUrl = new URL(req.url, `${protocol}://${host}`);
 
-    // Obtener parámetros dinámicos de la URL
-    const titulo = searchParams.get('titulo') || 'Devocional Diario';
-    const versiculo = searchParams.get('versiculo') || '';
+    // Parámetros de la imagen
+    const titulo = requestUrl.searchParams.get('titulo') || 'Devocional Diario';
+    const versiculo = requestUrl.searchParams.get('versiculo') || '';
 
-    // URL absoluta del logo e imagen de fondo alojados en la carpeta /public
-    const baseUrl = `${protocol}//${host}`;
+    // Rutas absolutas a tus imágenes en /public
+    const baseUrl = `${protocol}://${host}`;
     const logoUrl = `${baseUrl}/logo.png`;
     const bgUrl = `${baseUrl}/background.jpg`;
 
-    return new ImageResponse(
+    // Generar la imagen con @vercel/og
+    const imageResponse = new ImageResponse(
       (
         <div
           style={{
@@ -32,7 +36,7 @@ export default async function handler(req) {
             fontFamily: 'sans-serif',
           }}
         >
-          {/* 1. Encabezado Superior: LOGO */}
+          {/* 1. LOGO SUPERIOR IZQUIERDO */}
           <div
             style={{
               display: 'flex',
@@ -41,7 +45,6 @@ export default async function handler(req) {
               alignItems: 'center',
             }}
           >
-            {/* Contenedor con filtro de sombra para resaltar el logo */}
             <img
               src={logoUrl}
               alt="Logo"
@@ -49,12 +52,12 @@ export default async function handler(req) {
               height="140"
               style={{
                 objectFit: 'contain',
-                filter: 'drop-shadow(0px 4px 8px rgba(0, 0, 0, 0.4))',
+                filter: 'drop-shadow(0px 4px 8px rgba(0, 0, 0, 0.5))',
               }}
             />
           </div>
 
-          {/* 2. Cuerpo Central: TÍTULO Y VERSÍCULO */}
+          {/* 2. TÍTULO Y VERSÍCULO */}
           <div
             style={{
               display: 'flex',
@@ -66,7 +69,6 @@ export default async function handler(req) {
               padding: '20px',
             }}
           >
-            {/* Título Principal */}
             <h1
               style={{
                 fontSize: '58px',
@@ -76,14 +78,13 @@ export default async function handler(req) {
                 textTransform: 'uppercase',
                 letterSpacing: '2px',
                 lineHeight: '1.2',
-                textShadow: '0px 4px 12px rgba(0, 0, 0, 0.7)',
+                textShadow: '0px 4px 12px rgba(0, 0, 0, 0.8)',
               }}
             >
               {titulo}
             </h1>
 
-            {/* Versículo / Cita Bíblica */}
-            {versiculo && (
+            {versiculo ? (
               <p
                 style={{
                   fontSize: '32px',
@@ -98,10 +99,10 @@ export default async function handler(req) {
               >
                 "{versiculo}"
               </p>
-            )}
+            ) : null}
           </div>
 
-          {/* 3. Firma Inferior Derecha: MMM LAS PALMAS (Efecto Metálico Brillante) */}
+          {/* 3. FIRMA METÁLICA BRILLANTE (MMM LAS PALMAS) */}
           <div
             style={{
               position: 'absolute',
@@ -117,12 +118,10 @@ export default async function handler(req) {
                 fontWeight: '900',
                 textTransform: 'uppercase',
                 letterSpacing: '2px',
-                // Degradado Metálico Silver/Brillante
                 backgroundImage:
                   'linear-gradient(135deg, #E0E0E0 0%, #FFFFFF 25%, #9E9E9E 50%, #FFFFFF 75%, #CCCCCC 100%)',
                 backgroundClip: 'text',
                 color: 'transparent',
-                // Sombra sutil para proyectar volumen 3D
                 filter: 'drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.8))',
               }}
             >
@@ -133,11 +132,20 @@ export default async function handler(req) {
       ),
       {
         width: 1080,
-        height: 1080, // Formato cuadrado perfecto para Instagram / Facebook
+        height: 1080,
       }
     );
+
+    // Convertir el stream Web a Buffer para responder en Node.js
+    const arrayBuffer = await imageResponse.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.status(200).send(buffer);
+
   } catch (e) {
     console.error('Error generando la imagen OG:', e);
-    return new Response('Error al generar la imagen', { status: 500 });
+    return res.status(500).send('Error al generar la imagen: ' + e.message);
   }
 }
