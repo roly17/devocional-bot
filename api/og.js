@@ -1,9 +1,5 @@
 import { ImageResponse } from '@vercel/og';
 
-export const config = {
-  runtime: 'edge',
-};
-
 export default async function handler(req) {
   try {
     const { searchParams, host, protocol } = new URL(req.url);
