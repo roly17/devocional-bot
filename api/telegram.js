@@ -6,7 +6,6 @@ const redis = Redis.fromEnv();
 const TG_DOMAIN = "api.telegram.org";
 const TG_BASE = "https://" + TG_DOMAIN + "/bot";
 
-// Función para limpiar texto y evitar errores en HTML de Telegram
 function escapeHtml(text) {
   if (!text) return "";
   return text
@@ -41,24 +40,80 @@ export default async function handler(req, res) {
   const token = (process.env.BOT_TOKEN || "").trim();
   const update = req.body || {};
 
-  // 1. Manejo de clics en botones (callback_query)
+  // 1. MANEJO DE BOTONES (Callback Queries)
   if (update.callback_query) {
     const callbackId = update.callback_query.id;
     const data = update.callback_query.data;
     const chatId = update.callback_query.message?.chat?.id;
 
     if (token) {
+      // Quitar el spinner de carga del botón en Telegram
       const cbUrl = TG_BASE + token + "/answerCallbackQuery";
       await fetch(cbUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ callback_query_id: callbackId, text: "Procesando..." }),
       });
-      await responderTelegram(chatId, "🔘 Presionaste el botón: <code>" + escapeHtml(data) + "</code>\n<i>(La publicación automática en Facebook se activará en el Paso 3)</i>.", token);
+
+      // ACCIÓN: CONFIRMAR PUBLICACIÓN EN FACEBOOK
+      if (data.startsWith("confirmar:")) {
+        const draftId = data.replace("confirmar:", "");
+        const rawDraft = await redis.get(draftId);
+
+        if (!rawDraft) {
+          await responderTelegram(chatId, "⚠️ <b>El borrador ya no existe o ha expirado.</b>", token);
+          return res.status(200).send("OK");
+        }
+
+        const contenido = typeof rawDraft === "string" ? JSON.parse(rawDraft) : rawDraft;
+        const fbPageId = (process.env.FB_PAGE_ID || "").trim();
+        const fbToken = (process.env.FB_PAGE_ACCESS_TOKEN || "").trim();
+
+        if (!fbPageId || !fbToken) {
+          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables <code>FB_PAGE_ID</code> o <code>FB_PAGE_ACCESS_TOKEN</code> en Vercel.", token);
+          return res.status(200).send("OK");
+        }
+
+        await responderTelegram(chatId, "🚀 <b>Publicando en la página de Facebook de MMM Las Palmas...</b>", token);
+
+        const host = req.headers.host || "devocional-bot-eosin.vercel.app";
+        const imageUrl = "https://" + host + "/api/og?titulo=" + encodeURIComponent(contenido.titulo) + "&versiculo=" + encodeURIComponent(contenido.versiculo);
+
+        // Llamada a la Graph API de Meta
+        const fbUrl = "https://graph.facebook.com/v20.0/" + fbPageId + "/photos";
+        const fbRes = await fetch(fbUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: imageUrl,
+            caption: contenido.copy,
+            access_token: fbToken
+          }),
+        });
+
+        const fbData = await fbRes.json();
+
+        if (fbData.id || fbData.post_id) {
+          // Eliminar el borrador de Redis tras publicar con éxito
+          await redis.del(draftId);
+          const postId = fbData.post_id || fbData.id;
+          await responderTelegram(chatId, "🎉 <b>¡PUBLICACIÓN EXITOSA!</b>\n\nEl devocional ya está visible en la página de Facebook.\n🆔 <b>Post ID:</b> <code>" + postId + "</code>", token);
+        } else {
+          const fbError = fbData.error ? fbData.error.message : "Error desconocido";
+          await responderTelegram(chatId, "🚨 <b>Error al publicar en Facebook:</b>\n<code>" + escapeHtml(fbError) + "</code>", token);
+        }
+
+      // ACCIÓN: CANCELAR
+      } else if (data.startsWith("cancelar:")) {
+        const draftId = data.replace("cancelar:", "");
+        await redis.del(draftId);
+        await responderTelegram(chatId, "🗑️ <b>Publicación cancelada.</b> El borrador ha sido eliminado.", token);
+      }
     }
     return res.status(200).send("OK");
   }
 
+  // 2. RECEPCIÓN DE NUEVO DEVOCIONAL
   const text = update.message?.text;
   const chatId = update.message?.chat?.id;
 
@@ -69,15 +124,11 @@ export default async function handler(req, res) {
     return res.status(200).send("OK");
   }
 
-  if (!token) {
-    return res.status(200).send("OK");
-  }
+  if (!token) return res.status(200).send("OK");
 
   try {
-    // 2. Respuesta inmediata
     await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Inteligencia Artificial...</b>", token);
 
-    // 3. Procesamiento con Gemini AI
     const ai = new GoogleGenAI({});
     const prompt = 'Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:\n\n' +
       '- "titulo": título corto y llamativo (máx 6 palabras).\n' +
@@ -102,15 +153,12 @@ export default async function handler(req, res) {
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
-    // 4. Guardar borrador en Upstash Redis
     const draftId = "draft_" + Date.now();
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    // 5. Enlace de la imagen
     const host = req.headers.host || "devocional-bot-eosin.vercel.app";
     const imageUrl = "https://" + host + "/api/og?titulo=" + encodeURIComponent(contenido.titulo) + "&versiculo=" + encodeURIComponent(contenido.versiculo);
 
-    // 6. Enviar FOTO + CAPTION + BOTONES con formato HTML
     const sendPhotoUrl = TG_BASE + token + "/sendPhoto";
     const captionText = "📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n" +
       "✍️ <b>Texto para Facebook:</b>\n" + escapeHtml(contenido.copy) + "\n\n" +
@@ -137,7 +185,6 @@ export default async function handler(req, res) {
 
     const dataTelegram = await resTelegram.json();
 
-    // Respaldo en texto por si ocurre cualquier problema de red con la foto
     if (!dataTelegram.ok) {
       const fallbackMsg = "⚠️ <b>No se pudo adjuntar la foto directamente.</b> (" + escapeHtml(dataTelegram.description) + ")\n\n" +
         "📌 <b>" + escapeHtml(contenido.titulo) + "</b>\n📖 \"" + escapeHtml(contenido.versiculo) + "\"\n\n✍️ " + escapeHtml(contenido.copy) + "\n\n" +
