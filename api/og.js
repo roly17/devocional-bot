@@ -1,142 +1,147 @@
 import { ImageResponse } from '@vercel/og';
 
-export default async function handler(req, res) {
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req) {
   try {
-    // 1. Obtener parámetros. req.query funciona automáticamente en Serverless Functions de Vercel
-    const titulo = req.query.titulo || 'DEVOCIONAL DIARIO';
-    const versiculo = req.query.versiculo || '';
+    const { searchParams, host, protocol } = new URL(req.url);
 
-    const host = req.headers.host || 'devocional-bot-eosin.vercel.app';
-    const baseUrl = `https://${host}`;
+    // Obtener parámetros dinámicos de la URL
+    const titulo = searchParams.get('titulo') || 'Devocional Diario';
+    const versiculo = searchParams.get('versiculo') || '';
 
-    // 2. Definir la estructura visual en JavaScript puro (más seguro para Node)
-    const element = {
-      type: 'div',
-      props: {
-        style: {
-          height: '100%',
-          width: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          padding: '40px 50px',
-          backgroundImage: `url(${baseUrl}/fondo.png)`,
-          backgroundSize: '100% 100%',
-          fontFamily: 'sans-serif',
-        },
-        children: [
-          // Logo superior
-          {
-            type: 'div',
-            props: {
-              style: { display: 'flex', alignItems: 'center' },
-              children: [
-                {
-                  type: 'img',
-                  props: {
-                    src: `${baseUrl}/logo.png`, // Asegúrate de tener public/logo.png
-                    alt: 'Logo MMM',
-                    style: { width: '130px', height: 'auto' },
-                  },
-                },
-              ],
-            },
-          },
-          // Cuadro central de texto - Flex grow para ajustarse
-          {
-            type: 'div',
-            props: {
-              style: {
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexGrow: 1, // <--- Importante para ocupar espacio
-                textAlign: 'center',
-                padding: '30px',
-                borderRadius: '20px',
-                backgroundColor: 'rgba(20, 10, 5, 0.50)',
-                border: '1px solid rgba(255, 213, 79, 0.25)',
-                margin: '20px 0',
-              },
-              children: [
-                {
-                  type: 'h2',
-                  props: {
-                    style: {
-                      fontSize: '32px', // Ligeramente menor
-                      fontWeight: 'bold',
-                      color: '#FFD54F',
-                      letterSpacing: '2px',
-                      marginBottom: '10px',
-                      textTransform: 'uppercase',
-                    },
-                    children: titulo,
-                  },
-                },
-                {
-                  type: 'p',
-                  props: {
-                    style: {
-                      fontSize: '22px', // Reducido para versículos largos
-                      fontWeight: '500',
-                      lineHeight: '1.4',
-                      color: '#FFFFFF',
-                      fontStyle: 'italic',
-                      // wordWrap: 'break-word', // Más seguro si no hay espacios
-                    },
-                    children: `"${versiculo}"`,
-                  },
-                },
-              ],
-            },
-          },
-          // Pie de imagen
-          {
-            type: 'div',
-            props: {
-              style: {
-                display: 'flex',
-                justifyContent: 'flex-end',
-                alignItems: 'center',
-              },
-              children: [
-                {
-                  type: 'span',
-                  props: {
-                    style: {
-                      fontSize: '22px',
-                      fontWeight: 'bold',
-                      color: '#FFD54F',
-                      letterSpacing: '1px',
-                    },
-                    children: 'MMM LAS PALMAS',
-                  },
-                },
-              ],
-            },
-          },
-        ],
-      },
-    };
+    // URL absoluta del logo e imagen de fondo alojados en la carpeta /public
+    const baseUrl = `${protocol}//${host}`;
+    const logoUrl = `${baseUrl}/logo.png`;
+    const bgUrl = `${baseUrl}/background.jpg`;
 
-    // 3. Crear la respuesta de imagen
-    const imageResponse = new ImageResponse(element, {
-      width: 1200,
-      height: 630,
-    });
+    return new ImageResponse(
+      (
+        <div
+          style={{
+            height: '100%',
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundImage: `url(${bgUrl})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            padding: '70px 60px',
+            boxSizing: 'border-box',
+            position: 'relative',
+            fontFamily: 'sans-serif',
+          }}
+        >
+          {/* 1. Encabezado Superior: LOGO */}
+          <div
+            style={{
+              display: 'flex',
+              width: '100%',
+              justifyContent: 'flex-start',
+              alignItems: 'center',
+            }}
+          >
+            {/* Contenedor con filtro de sombra para resaltar el logo */}
+            <img
+              src={logoUrl}
+              alt="Logo"
+              width="140"
+              height="140"
+              style={{
+                objectFit: 'contain',
+                filter: 'drop-shadow(0px 4px 8px rgba(0, 0, 0, 0.4))',
+              }}
+            />
+          </div>
 
-    // 4. Convertir la imagen a Buffer y enviarla correctamente por res
-    const arrayBuffer = await imageResponse.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+          {/* 2. Cuerpo Central: TÍTULO Y VERSÍCULO */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              maxWidth: '90%',
+              padding: '20px',
+            }}
+          >
+            {/* Título Principal */}
+            <h1
+              style={{
+                fontSize: '58px',
+                fontWeight: '900',
+                color: '#FFFFFF',
+                margin: '0 0 25px 0',
+                textTransform: 'uppercase',
+                letterSpacing: '2px',
+                lineHeight: '1.2',
+                textShadow: '0px 4px 12px rgba(0, 0, 0, 0.7)',
+              }}
+            >
+              {titulo}
+            </h1>
 
-    res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    return res.status(200).send(buffer);
+            {/* Versículo / Cita Bíblica */}
+            {versiculo && (
+              <p
+                style={{
+                  fontSize: '32px',
+                  fontWeight: '500',
+                  color: '#F0F0F0',
+                  fontStyle: 'italic',
+                  margin: '0',
+                  lineHeight: '1.4',
+                  textShadow: '0px 2px 8px rgba(0, 0, 0, 0.8)',
+                  maxWidth: '95%',
+                }}
+              >
+                "{versiculo}"
+              </p>
+            )}
+          </div>
 
+          {/* 3. Firma Inferior Derecha: MMM LAS PALMAS (Efecto Metálico Brillante) */}
+          <div
+            style={{
+              position: 'absolute',
+              bottom: '45px',
+              right: '60px',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <span
+              style={{
+                fontSize: '32px',
+                fontWeight: '900',
+                textTransform: 'uppercase',
+                letterSpacing: '2px',
+                // Degradado Metálico Silver/Brillante
+                backgroundImage:
+                  'linear-gradient(135deg, #E0E0E0 0%, #FFFFFF 25%, #9E9E9E 50%, #FFFFFF 75%, #CCCCCC 100%)',
+                backgroundClip: 'text',
+                color: 'transparent',
+                // Sombra sutil para proyectar volumen 3D
+                filter: 'drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.8))',
+              }}
+            >
+              MMM Las Palmas
+            </span>
+          </div>
+        </div>
+      ),
+      {
+        width: 1080,
+        height: 1080, // Formato cuadrado perfecto para Instagram / Facebook
+      }
+    );
   } catch (e) {
-    console.error("Error en og.js:", e);
-    // res.status(500) es mejor que Response aquí para el backend tradicional
-    return res.status(500).send(`Error generando la imagen: ${e.message}`);
+    console.error('Error generando la imagen OG:', e);
+    return new Response('Error al generar la imagen', { status: 500 });
   }
 }
