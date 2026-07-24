@@ -1,18 +1,15 @@
 import { ImageResponse } from '@vercel/og';
 
-export const config = {
-  runtime: 'edge',
-};
-
-export default async function handler(req) {
+export default async function handler(request) {
   try {
-    const url = new URL(req.url);
+    // URL web nativa recibida directamente por Vercel
+    const url = new URL(request.url);
 
     // Parámetros dinámicos
     const titulo = url.searchParams.get('titulo') || 'Devocional Diario';
     const versiculo = url.searchParams.get('versiculo') || '';
 
-    // Rutas de imágenes estáticas en /public
+    // Rutas absolutas generadas automáticamente desde el origen de la petición
     const logoUrl = `${url.origin}/logo.png`;
     const bgUrl = `${url.origin}/background.jpg`;
 
@@ -55,7 +52,7 @@ export default async function handler(req) {
             />
           </div>
 
-          {/* 2. TÍTULO Y VERSÍCULO */}
+          {/* 2. TÍTULO Y VERSÍCULO CON SOMBRAS DE ALTO CONTRASTE */}
           <div
             style={{
               display: 'flex',
@@ -67,7 +64,6 @@ export default async function handler(req) {
               padding: '20px',
             }}
           >
-            {/* Título Principal */}
             <h1
               style={{
                 fontSize: '56px',
@@ -83,7 +79,6 @@ export default async function handler(req) {
               {titulo}
             </h1>
 
-            {/* Cita Bíblica */}
             {versiculo ? (
               <p
                 style={{
@@ -102,7 +97,7 @@ export default async function handler(req) {
             ) : null}
           </div>
 
-          {/* 3. FIRMA EN NEGRITA CON EFECTO PLATEADO/BRILLANTE (MMM LAS PALMAS) */}
+          {/* 3. FIRMA EN NEGRITA CON BRILLO PLATEADO SATINADO */}
           <div
             style={{
               display: 'flex',
@@ -119,7 +114,6 @@ export default async function handler(req) {
                 textTransform: 'uppercase',
                 letterSpacing: '2px',
                 color: '#FFFFFF',
-                // Sombra de volumen + brillo satinado blanco
                 textShadow:
                   '0px 3px 8px rgba(0, 0, 0, 0.9), 0px 0px 10px rgba(255, 255, 255, 0.8)',
               }}
