@@ -13,7 +13,7 @@ export default async function handler(req, res) {
 
     // Rutas absolutas de las imágenes en /public
     // (Asegúrate de si en tu carpeta public se llama background.jpg o fondo.png)
-    const bgUrl = `${baseUrl}/background.jpg`;
+    const bgUrl = `${baseUrl}/fondo.png`;
     const logoUrl = `${baseUrl}/logo.png`;
 
     // 2. Estructura visual en Objetos JS puros (Evita errores de compilación JSX)
