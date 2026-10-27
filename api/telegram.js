@@ -1,10 +1,8 @@
-import { GoogleGenAI } from "@google/genai";
-import { Redis } from "@upstash/redis";
-import { ImageResponse } from "@vercel/og";
-import { readFileSync } from "fs";
-import { join } from "path";
-
-export const maxDuration = 60; 
+const { GoogleGenAI } = require("@google/genai");
+const { Redis } = require("@upstash/redis");
+const { ImageResponse } = require("@vercel/og");
+const { readFileSync } = require("fs");
+const { join } = require("path");
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
@@ -32,13 +30,11 @@ async function responderTelegram(chatId, htmlText, token) {
   }
 }
 
-// 🎨 NUEVO: GENERADOR DE IMÁGENES INTERNO (Cero internet, cero bloqueos)
+// 🎨 GENERADOR INTERNO INMUNE A ERRORES
 async function crearImagenLocal(titulo, versiculo) {
-  // Leemos las imágenes directamente del disco duro del servidor
   const bgPath = join(process.cwd(), 'public', 'fondo.png');
   const logoPath = join(process.cwd(), 'public', 'logo.png');
   
-  // Las convertimos a Base64 para inyectarlas directamente al motor de dibujo
   const bgBase64 = `data:image/png;base64,${readFileSync(bgPath).toString('base64')}`;
   const logoBase64 = `data:image/png;base64,${readFileSync(logoPath).toString('base64')}`;
 
@@ -88,8 +84,9 @@ async function crearImagenLocal(titulo, versiculo) {
   return new Blob([arrayBuffer], { type: 'image/png' });
 }
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(200).send("Bot activo.");
+// LÓGICA PRINCIPAL EXPORTADA EN FORMATO COMMONJS
+module.exports = async function handler(req, res) {
+  if (req.method !== "POST") return res.status(200).send("Bot activo y listo.");
 
   const token = (process.env.BOT_TOKEN || "").trim();
   const update = req.body || {};
@@ -101,7 +98,7 @@ export default async function handler(req, res) {
     await redis.set(`update_${update.update_id}`, "procesado", { ex: 600 });
   }
 
-  // 1. MANEJO DE BOTONES Y PUBLICACIÓN EN FACEBOOK
+  // 1. MANEJO DE BOTONES
   if (update.callback_query) {
     const callbackId = update.callback_query.id;
     const data = update.callback_query.data;
@@ -118,7 +115,7 @@ export default async function handler(req, res) {
         const rawDraft = await redis.get(draftId);
 
         if (!rawDraft) {
-          await responderTelegram(chatId, "⚠️ <b>El borrador expiró.</b>", token);
+          await responderTelegram(chatId, "⚠️ <b>El borrador ya no existe o ha expirado.</b>", token);
           return res.status(200).send("OK");
         }
 
@@ -134,10 +131,8 @@ export default async function handler(req, res) {
         await responderTelegram(chatId, "🚀 <b>Publicando en Facebook...</b>", token);
 
         try {
-          // Generamos la imagen para Facebook internamente
           const imgBlob = await crearImagenLocal(contenido.titulo, contenido.versiculo);
           
-          // Enviamos la imagen como archivo directamente a Meta (sin URLs)
           const fbForm = new FormData();
           fbForm.append("access_token", fbToken);
           fbForm.append("caption", contenido.copy);
@@ -215,7 +210,6 @@ DEVOCIONAL:
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
     const captionText = `📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n✍️ <b>Texto para Facebook:</b>\n${escapeHtml(contenido.copy)}\n\n💾 <i>ID: ${escapeHtml(draftId)}</i>`;
 
-    // Generamos la imagen con el procesador (sin red)
     let imgBlob;
     try {
       imgBlob = await crearImagenLocal(contenido.titulo, contenido.versiculo);
@@ -245,4 +239,4 @@ DEVOCIONAL:
   }
 
   return res.status(200).send("OK");
-}
+};
