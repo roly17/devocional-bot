@@ -41,6 +41,18 @@ export default async function handler(req, res) {
   const token = (process.env.BOT_TOKEN || "").trim();
   const update = req.body || {};
 
+  // --- SISTEMA ANTI-DUPLICADOS ---
+  // Telegram a veces reenvía el mismo evento si demoramos en responder.
+  if (update.update_id) {
+    const isDuplicate = await redis.get(`update_${update.update_id}`);
+    if (isDuplicate) {
+      // Si ya vimos este update_id, respondemos "OK" a Telegram para que deje de molestar y detenemos el código.
+      return res.status(200).send("OK");
+    }
+    // Guardamos el update_id en Redis por 10 minutos (600 segundos)
+    await redis.set(`update_${update.update_id}`, "procesado", { ex: 600 });
+  }
+
   // 1. MANEJO DE BOTONES (Callback Queries)
   if (update.callback_query) {
     const callbackId = update.callback_query.id;
@@ -123,7 +135,6 @@ export default async function handler(req, res) {
   try {
     await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Gemini...</b>", token);
 
-    // Inicializamos con tu API KEY de AI Studio
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt = `Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
 
@@ -138,18 +149,44 @@ Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:
 DEVOCIONAL:
 """${text}"""`;
 
-    // SOLUCIÓN: Usamos la Interactions API requerida por Google y el modelo 3.8-flash
-    const interaction = await ai.interactions.create({
-      model: "gemini-3.8-flash",
-      input: prompt,
-      response_format: {
-        type: "text",
-        mime_type: "application/json"
-      }
-    });
+    // --- SISTEMA DE REINTENTOS PARA GEMINI (Evitar Error 503) ---
+    let raw = "";
+    let intentos = 3;
+    let exito = false;
+    let ultimoError = null;
 
-    // Extraemos la respuesta del objeto "interaction"
-    let raw = interaction.output_text.trim();
+    for (let i = 0; i < intentos; i++) {
+      try {
+        const interaction = await ai.interactions.create({
+          model: "gemini-3.8-flash",
+          input: prompt,
+          response_format: {
+            type: "text",
+            mime_type: "application/json"
+          }
+        });
+        
+        raw = interaction.output_text.trim();
+        exito = true;
+        break; // Si la petición fue exitosa, rompemos el bucle
+      } catch (err) {
+        ultimoError = err;
+        // Si el error contiene "503", esperamos 2.5 segundos y volvemos a intentar
+        if (err.message && err.message.includes("503")) {
+          console.warn(`[Intento ${i + 1}] Error 503 de Gemini. Esperando 2.5s para reintentar...`);
+          await new Promise(resolve => setTimeout(resolve, 2500));
+        } else {
+          // Si es otro tipo de error (ej. clave inválida, modelo no encontrado), no reintentamos
+          break;
+        }
+      }
+    }
+
+    if (!exito) {
+      throw ultimoError; // Lanzamos el error final si fallaron los 3 intentos
+    }
+
+    // Limpiamos el texto por si Gemini devolvió el JSON envuelto en Markdown
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
