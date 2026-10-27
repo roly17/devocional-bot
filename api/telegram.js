@@ -1,5 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { Redis } from "@upstash/redis";
+import { ImageResponse } from "@vercel/og";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 export const maxDuration = 60; 
 
@@ -13,61 +16,100 @@ const TG_BASE = "https://" + TG_DOMAIN + "/bot";
 
 function escapeHtml(text) {
   if (!text) return "";
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 async function responderTelegram(chatId, htmlText, token) {
   if (!chatId || !token) return;
-  const url = TG_BASE + token + "/sendMessage";
   try {
-    await fetch(url, {
+    await fetch(TG_BASE + token + "/sendMessage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: htmlText,
-        parse_mode: "HTML"
-      }),
+      body: JSON.stringify({ chat_id: chatId, text: htmlText, parse_mode: "HTML" }),
     });
   } catch (e) {
     console.error("Error enviando mensaje a Telegram:", e);
   }
 }
 
+// 🎨 NUEVO: GENERADOR DE IMÁGENES INTERNO (Cero internet, cero bloqueos)
+async function crearImagenLocal(titulo, versiculo) {
+  // Leemos las imágenes directamente del disco duro del servidor
+  const bgPath = join(process.cwd(), 'public', 'fondo.png');
+  const logoPath = join(process.cwd(), 'public', 'logo.png');
+  
+  // Las convertimos a Base64 para inyectarlas directamente al motor de dibujo
+  const bgBase64 = `data:image/png;base64,${readFileSync(bgPath).toString('base64')}`;
+  const logoBase64 = `data:image/png;base64,${readFileSync(logoPath).toString('base64')}`;
+
+  const element = {
+    type: 'div',
+    props: {
+      style: {
+        height: '100%', width: '100%', display: 'flex', flexDirection: 'column',
+        justifyContent: 'space-between', alignItems: 'center', padding: '60px 50px',
+        backgroundImage: `url(${bgBase64})`, backgroundSize: 'cover', backgroundPosition: 'center',
+        fontFamily: 'sans-serif', boxSizing: 'border-box',
+      },
+      children: [
+        {
+          type: 'div',
+          props: {
+            style: { display: 'flex', width: '100%', justifyContent: 'flex-start', alignItems: 'center' },
+            children: [{ type: 'img', props: { src: logoBase64, style: { width: '140px', height: '140px', objectFit: 'contain' } } }],
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: {
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+              width: '90%', padding: '35px 30px', borderRadius: '24px', backgroundColor: 'rgba(0, 0, 0, 0.55)', border: '1px solid rgba(255, 255, 255, 0.25)',
+            },
+            children: [
+              { type: 'h1', props: { style: { fontSize: '48px', fontWeight: 'bold', color: '#FFFFFF', margin: '0 0 18px 0', textTransform: 'uppercase', textShadow: '0px 4px 10px rgba(0, 0, 0, 0.9)' }, children: titulo } },
+              versiculo ? { type: 'p', props: { style: { fontSize: '28px', fontWeight: '500', color: '#F0F0F0', fontStyle: 'italic', margin: '0', lineHeight: '1.4', textShadow: '0px 2px 8px rgba(0, 0, 0, 0.9)' }, children: `"${versiculo}"` } } : null,
+            ].filter(Boolean),
+          },
+        },
+        {
+          type: 'div',
+          props: {
+            style: { display: 'flex', width: '100%', justifyContent: 'flex-end', alignItems: 'center' },
+            children: [{ type: 'span', props: { style: { fontSize: '28px', fontWeight: 'bold', color: '#FFFFFF', letterSpacing: '2px', textShadow: '0px 3px 8px rgba(0, 0, 0, 0.9), 0px 0px 10px rgba(255, 255, 255, 0.7)' }, children: 'MMM LAS PALMAS' } }],
+          },
+        },
+      ],
+    },
+  };
+
+  const imageResponse = new ImageResponse(element, { width: 1080, height: 1080 });
+  const arrayBuffer = await imageResponse.arrayBuffer();
+  return new Blob([arrayBuffer], { type: 'image/png' });
+}
+
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(200).send("Bot activo y listo.");
-  }
+  if (req.method !== "POST") return res.status(200).send("Bot activo.");
 
   const token = (process.env.BOT_TOKEN || "").trim();
   const update = req.body || {};
 
-  // SISTEMA ANTI-DUPLICADOS
+  // ANTI-DUPLICADOS
   if (update.update_id) {
     const isDuplicate = await redis.get(`update_${update.update_id}`);
     if (isDuplicate) return res.status(200).send("OK");
     await redis.set(`update_${update.update_id}`, "procesado", { ex: 600 });
   }
 
-  // --- SOLUCIÓN: DOMINIO DINÁMICO EXACTO ---
-  // Capturamos el dominio real público desde el que Telegram hace la petición
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  const baseUrl = `https://${host}`;
-
-  // 1. MANEJO DE BOTONES
+  // 1. MANEJO DE BOTONES Y PUBLICACIÓN EN FACEBOOK
   if (update.callback_query) {
     const callbackId = update.callback_query.id;
     const data = update.callback_query.data;
     const chatId = update.callback_query.message?.chat?.id;
 
     if (token) {
-      const cbUrl = TG_BASE + token + "/answerCallbackQuery";
-      await fetch(cbUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      await fetch(TG_BASE + token + "/answerCallbackQuery", {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ callback_query_id: callbackId, text: "Procesando..." }),
       });
 
@@ -76,7 +118,7 @@ export default async function handler(req, res) {
         const rawDraft = await redis.get(draftId);
 
         if (!rawDraft) {
-          await responderTelegram(chatId, "⚠️ <b>El borrador ya no existe o ha expirado.</b>", token);
+          await responderTelegram(chatId, "⚠️ <b>El borrador expiró.</b>", token);
           return res.status(200).send("OK");
         }
 
@@ -85,43 +127,41 @@ export default async function handler(req, res) {
         const fbToken = (process.env.FB_PAGE_ACCESS_TOKEN || "").trim();
 
         if (!fbPageId || !fbToken) {
-          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables de Facebook en Vercel.", token);
+          await responderTelegram(chatId, "🚨 Faltan las variables de Facebook.", token);
           return res.status(200).send("OK");
         }
 
         await responderTelegram(chatId, "🚀 <b>Publicando en Facebook...</b>", token);
 
         try {
-          const imageUrl = `${baseUrl}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
-          const fbUrl = `https://graph.facebook.com/v20.0/${fbPageId}/photos`;
+          // Generamos la imagen para Facebook internamente
+          const imgBlob = await crearImagenLocal(contenido.titulo, contenido.versiculo);
           
-          const fbRes = await fetch(fbUrl, {
+          // Enviamos la imagen como archivo directamente a Meta (sin URLs)
+          const fbForm = new FormData();
+          fbForm.append("access_token", fbToken);
+          fbForm.append("caption", contenido.copy);
+          fbForm.append("source", imgBlob, "devocional.png"); 
+
+          const fbRes = await fetch(`https://graph.facebook.com/v20.0/${fbPageId}/photos`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              url: imageUrl,
-              caption: contenido.copy,
-              access_token: fbToken
-            }),
+            body: fbForm,
           });
 
           const fbData = await fbRes.json();
 
           if (fbData.id || fbData.post_id) {
             await redis.del(draftId);
-            const postId = fbData.post_id || fbData.id;
-            await responderTelegram(chatId, `🎉 <b>¡PUBLICACIÓN EXITOSA!</b>\n\n🆔 <b>Post ID:</b> <code>${postId}</code>`, token);
+            await responderTelegram(chatId, `🎉 <b>¡PUBLICACIÓN EXITOSA!</b>\n\n🆔 <b>Post ID:</b> <code>${fbData.post_id || fbData.id}</code>`, token);
           } else {
-            const fbError = fbData.error ? fbData.error.message : "Error desconocido";
-            await responderTelegram(chatId, `🚨 <b>Error de Facebook:</b>\n<code>${escapeHtml(fbError)}</code>`, token);
+            await responderTelegram(chatId, `🚨 <b>Error de Facebook:</b>\n<code>${escapeHtml(fbData.error?.message)}</code>`, token);
           }
         } catch (fbErr) {
           await responderTelegram(chatId, `🚨 <b>Error al conectar con Facebook:</b>\n<code>${escapeHtml(fbErr.message)}</code>`, token);
         }
 
       } else if (data.startsWith("cancelar:")) {
-        const draftId = data.replace("cancelar:", "");
-        await redis.del(draftId);
+        await redis.del(data.replace("cancelar:", ""));
         await responderTelegram(chatId, "🗑️ <b>Publicación cancelada.</b>", token);
       }
     }
@@ -139,40 +179,30 @@ export default async function handler(req, res) {
 
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt = `Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
-
 - "titulo": título corto y llamativo (máx 6 palabras).
 - "versiculo": la cita bíblica principal del texto. OBLIGATORIO: Extraída textualmente de la Biblia versión Reina Valera 1960 (RVR1960).
 - "copy": texto para el post de Facebook (3-4 líneas, tono cálido).
 Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:
-1. Un hashtag sobre el tema principal del devocional (ej. #Fe, #Esperanza).
+1. Un hashtag sobre el tema principal del devocional (ej. #Fe).
 2. #MMMLasPalmas
 3. #MMM
-
 DEVOCIONAL:
 """${text}"""`;
 
-    let raw = "";
-    let intentos = 3;
-    let exito = false;
-    let ultimoError = null;
+    let raw = "", intentos = 3, exito = false, ultimoError = null;
 
     for (let i = 0; i < intentos; i++) {
       try {
         const interaction = await ai.interactions.create({
-          model: "gemini-3.8-flash",
-          input: prompt,
+          model: "gemini-3.8-flash", input: prompt,
           response_format: { type: "text", mime_type: "application/json" }
         });
         raw = interaction.output_text.trim();
-        exito = true;
-        break;
+        exito = true; break;
       } catch (err) {
         ultimoError = err;
-        if (err.message && err.message.includes("503")) {
-          await new Promise(resolve => setTimeout(resolve, 2500));
-        } else {
-          break;
-        }
+        if (err.message && err.message.includes("503")) await new Promise(resolve => setTimeout(resolve, 2500));
+        else break;
       }
     }
 
@@ -183,25 +213,14 @@ DEVOCIONAL:
 
     const draftId = "draft_" + Date.now();
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
-
-    const imageUrl = `${baseUrl}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
     const captionText = `📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n✍️ <b>Texto para Facebook:</b>\n${escapeHtml(contenido.copy)}\n\n💾 <i>ID: ${escapeHtml(draftId)}</i>`;
 
+    // Generamos la imagen con el procesador (sin red)
     let imgBlob;
     try {
-      const imgResponse = await fetch(imageUrl);
-      const contentType = imgResponse.headers.get("content-type") || "";
-      
-      if (!imgResponse.ok || !contentType.includes("image")) {
-        // --- AQUÍ ESTÁ LA MEJORA ---
-        // Leemos el texto exacto del error que generó og.js para saber qué le duele
-        const textError = await imgResponse.text();
-        throw new Error(`Error interno en og.js (HTTP ${imgResponse.status}): ${textError}`);
-      }
-      
-      imgBlob = await imgResponse.blob();
-    } catch (fetchErr) {
-      throw new Error("Generador de imagen falló: " + fetchErr.message);
+      imgBlob = await crearImagenLocal(contenido.titulo, contenido.versiculo);
+    } catch (err) {
+      throw new Error("Fallo en dibujado interno: " + err.message);
     }
 
     const formData = new FormData();
@@ -210,29 +229,18 @@ DEVOCIONAL:
     formData.append("caption", captionText);
     formData.append("parse_mode", "HTML");
     formData.append("reply_markup", JSON.stringify({
-      inline_keyboard: [
-        [
-          { text: "✅ Publicar en Facebook", callback_data: "confirmar:" + draftId },
-          { text: "❌ Cancelar", callback_data: "cancelar:" + draftId }
-        ]
-      ]
+      inline_keyboard: [[ { text: "✅ Publicar en Facebook", callback_data: "confirmar:" + draftId }, { text: "❌ Cancelar", callback_data: "cancelar:" + draftId } ]]
     }));
 
-    const sendPhotoUrl = TG_BASE + token + "/sendPhoto";
-    const resTelegram = await fetch(sendPhotoUrl, {
-      method: "POST",
-      body: formData,
-    });
-
+    const resTelegram = await fetch(TG_BASE + token + "/sendPhoto", { method: "POST", body: formData });
     const dataTelegram = await resTelegram.json();
 
     if (!dataTelegram.ok) {
-      const fallbackMsg = `⚠️ <b>No se pudo adjuntar la foto directamente.</b> (${escapeHtml(dataTelegram.description)})\n\n📌 <b>${escapeHtml(contenido.titulo)}</b>\n📖 "${escapeHtml(contenido.versiculo)}"\n\n✍️ ${escapeHtml(contenido.copy)}\n\n🖼️ <a href="${imageUrl}">Abre tu imagen generada aquí</a>`;
-      await responderTelegram(chatId, fallbackMsg, token);
+      await responderTelegram(chatId, `⚠️ <b>No se adjuntó la foto:</b> ${escapeHtml(dataTelegram.description)}\n\n📌 <b>${escapeHtml(contenido.titulo)}</b>\n📖 "${escapeHtml(contenido.versiculo)}"`, token);
     }
 
   } catch (err) {
-    console.error("❌ Error en el proceso:", err);
+    console.error("❌ Error:", err);
     await responderTelegram(chatId, `🚨 <b>Error en el servidor:</b>\n<code>${escapeHtml(err.message)}</code>`, token);
   }
 
