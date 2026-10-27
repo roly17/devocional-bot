@@ -1,8 +1,9 @@
 const { GoogleGenAI } = require("@google/genai");
 const { Redis } = require("@upstash/redis");
-const { ImageResponse } = require("@vercel/og");
 const { readFileSync } = require("fs");
 const { join } = require("path");
+
+// Ojo: Ya no hacemos 'require' de @vercel/og aquí arriba.
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
@@ -30,8 +31,11 @@ async function responderTelegram(chatId, htmlText, token) {
   }
 }
 
-// 🎨 GENERADOR INTERNO INMUNE A ERRORES
+// 🎨 GENERADOR INTERNO DE IMÁGENES
 async function crearImagenLocal(titulo, versiculo) {
+  // 🚀 LA SOLUCIÓN: Cargamos @vercel/og de forma dinámica solo cuando se necesita
+  const { ImageResponse } = await import("@vercel/og");
+  
   const bgPath = join(process.cwd(), 'public', 'fondo.png');
   const logoPath = join(process.cwd(), 'public', 'logo.png');
   
@@ -84,7 +88,7 @@ async function crearImagenLocal(titulo, versiculo) {
   return new Blob([arrayBuffer], { type: 'image/png' });
 }
 
-// LÓGICA PRINCIPAL EXPORTADA EN FORMATO COMMONJS
+// LÓGICA PRINCIPAL (Exportada en formato CommonJS)
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") return res.status(200).send("Bot activo y listo.");
 
