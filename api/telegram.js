@@ -3,12 +3,17 @@ import { Redis } from "@upstash/redis";
 
 export const maxDuration = 60; 
 
+// Inicializamos Redis asegurando las credenciales correctas
 const redis = new Redis({
   url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
 });
+
 const TG_DOMAIN = "api.telegram.org";
 const TG_BASE = "https://" + TG_DOMAIN + "/bot";
+
+// Fijamos tu dominio para evitar rutas rotas en el entorno interno de Vercel
+const PROJECT_DOMAIN = "devocional-bot-eosin.vercel.app"; 
 
 function escapeHtml(text) {
   if (!text) return "";
@@ -45,14 +50,11 @@ export default async function handler(req, res) {
   const update = req.body || {};
 
   // --- SISTEMA ANTI-DUPLICADOS ---
-  // Telegram a veces reenvía el mismo evento si demoramos en responder.
   if (update.update_id) {
     const isDuplicate = await redis.get(`update_${update.update_id}`);
     if (isDuplicate) {
-      // Si ya vimos este update_id, respondemos "OK" a Telegram para que deje de molestar y detenemos el código.
       return res.status(200).send("OK");
     }
-    // Guardamos el update_id en Redis por 10 minutos (600 segundos)
     await redis.set(`update_${update.update_id}`, "procesado", { ex: 600 });
   }
 
@@ -84,18 +86,16 @@ export default async function handler(req, res) {
         const fbToken = (process.env.FB_PAGE_ACCESS_TOKEN || "").trim();
 
         if (!fbPageId || !fbToken) {
-          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables <code>FB_PAGE_ID</code> o <code>FB_PAGE_ACCESS_TOKEN</code>.", token);
+          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables en Vercel.", token);
           return res.status(200).send("OK");
         }
 
         await responderTelegram(chatId, "🚀 <b>Publicando en Facebook...</b>", token);
 
         try {
-          const host = req.headers.host || "devocional-bot-eosin.vercel.app";
-          const protocol = req.headers['x-forwarded-proto'] || 'https';
-          const imageUrl = `${protocol}://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
-
+          const imageUrl = `https://${PROJECT_DOMAIN}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
           const fbUrl = `https://graph.facebook.com/v20.0/${fbPageId}/photos`;
+          
           const fbRes = await fetch(fbUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -152,7 +152,6 @@ Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:
 DEVOCIONAL:
 """${text}"""`;
 
-    // --- SISTEMA DE REINTENTOS PARA GEMINI (Evitar Error 503) ---
     let raw = "";
     let intentos = 3;
     let exito = false;
@@ -163,69 +162,67 @@ DEVOCIONAL:
         const interaction = await ai.interactions.create({
           model: "gemini-3.8-flash",
           input: prompt,
-          response_format: {
-            type: "text",
-            mime_type: "application/json"
-          }
+          response_format: { type: "text", mime_type: "application/json" }
         });
-        
         raw = interaction.output_text.trim();
         exito = true;
-        break; // Si la petición fue exitosa, rompemos el bucle
+        break;
       } catch (err) {
         ultimoError = err;
-        // Si el error contiene "503", esperamos 2.5 segundos y volvemos a intentar
         if (err.message && err.message.includes("503")) {
-          console.warn(`[Intento ${i + 1}] Error 503 de Gemini. Esperando 2.5s para reintentar...`);
           await new Promise(resolve => setTimeout(resolve, 2500));
         } else {
-          // Si es otro tipo de error (ej. clave inválida, modelo no encontrado), no reintentamos
           break;
         }
       }
     }
 
-    if (!exito) {
-      throw ultimoError; // Lanzamos el error final si fallaron los 3 intentos
-    }
+    if (!exito) throw ultimoError;
 
-    // Limpiamos el texto por si Gemini devolvió el JSON envuelto en Markdown
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
     const draftId = "draft_" + Date.now();
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    const host = req.headers.host || "devocional-bot-eosin.vercel.app";
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const imageUrl = `${protocol}://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
-
-    const sendPhotoUrl = TG_BASE + token + "/sendPhoto";
+    const imageUrl = `https://${PROJECT_DOMAIN}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
     const captionText = `📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n✍️ <b>Texto para Facebook:</b>\n${escapeHtml(contenido.copy)}\n\n💾 <i>ID: ${escapeHtml(draftId)}</i>`;
 
+    // SOLUCIÓN: El bot descarga la imagen localmente primero para evadir los límites de tiempo de Telegram
+    let imgBlob;
+    try {
+      const imgResponse = await fetch(imageUrl);
+      if (!imgResponse.ok) throw new Error(`HTTP ${imgResponse.status}`);
+      imgBlob = await imgResponse.blob();
+    } catch (fetchErr) {
+      throw new Error("No se pudo generar la imagen local: " + fetchErr.message);
+    }
+
+    // Construimos un formulario nativo para enviarle el archivo físico a Telegram
+    const formData = new FormData();
+    formData.append("chat_id", chatId);
+    formData.append("photo", imgBlob, "devocional.png");
+    formData.append("caption", captionText);
+    formData.append("parse_mode", "HTML");
+    formData.append("reply_markup", JSON.stringify({
+      inline_keyboard: [
+        [
+          { text: "✅ Publicar en Facebook", callback_data: "confirmar:" + draftId },
+          { text: "❌ Cancelar", callback_data: "cancelar:" + draftId }
+        ]
+      ]
+    }));
+
+    const sendPhotoUrl = TG_BASE + token + "/sendPhoto";
     const resTelegram = await fetch(sendPhotoUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        photo: imageUrl,
-        caption: captionText,
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "✅ Publicar en Facebook", callback_data: "confirmar:" + draftId },
-              { text: "❌ Cancelar", callback_data: "cancelar:" + draftId }
-            ]
-          ]
-        }
-      }),
+      body: formData,
     });
 
     const dataTelegram = await resTelegram.json();
 
     if (!dataTelegram.ok) {
-      const fallbackMsg = `⚠️ <b>No se pudo adjuntar la foto.</b> (${escapeHtml(dataTelegram.description)})\n\n📌 <b>${escapeHtml(contenido.titulo)}</b>\n📖 "${escapeHtml(contenido.versiculo)}"\n\n✍️ ${escapeHtml(contenido.copy)}\n\n🖼️ <a href="${imageUrl}">Abre tu imagen generada aquí</a>`;
+      const fallbackMsg = `⚠️ <b>No se pudo adjuntar la foto directamente.</b> (${escapeHtml(dataTelegram.description)})\n\n📌 <b>${escapeHtml(contenido.titulo)}</b>\n📖 "${escapeHtml(contenido.versiculo)}"\n\n✍️ ${escapeHtml(contenido.copy)}\n\n🖼️ <a href="${imageUrl}">Abre tu imagen generada aquí</a>`;
       await responderTelegram(chatId, fallbackMsg, token);
     }
 
