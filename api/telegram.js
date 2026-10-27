@@ -10,8 +10,6 @@ const redis = new Redis({
 
 const TG_DOMAIN = "api.telegram.org";
 const TG_BASE = "https://" + TG_DOMAIN + "/bot";
-// Fijamos tu dominio oficial en producción para evitar URLs de prueba bloqueadas
-const PROJECT_DOMAIN = "devocional-bot-eosin.vercel.app"; 
 
 function escapeHtml(text) {
   if (!text) return "";
@@ -47,16 +45,19 @@ export default async function handler(req, res) {
   const token = (process.env.BOT_TOKEN || "").trim();
   const update = req.body || {};
 
-  // --- SISTEMA ANTI-DUPLICADOS ---
+  // SISTEMA ANTI-DUPLICADOS
   if (update.update_id) {
     const isDuplicate = await redis.get(`update_${update.update_id}`);
     if (isDuplicate) return res.status(200).send("OK");
     await redis.set(`update_${update.update_id}`, "procesado", { ex: 600 });
   }
 
-  const baseUrl = `https://${PROJECT_DOMAIN}`;
+  // --- SOLUCIÓN: DOMINIO DINÁMICO EXACTO ---
+  // Capturamos el dominio real público desde el que Telegram hace la petición
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const baseUrl = `https://${host}`;
 
-  // 1. MANEJO DE BOTONES (Callback Queries)
+  // 1. MANEJO DE BOTONES
   if (update.callback_query) {
     const callbackId = update.callback_query.id;
     const data = update.callback_query.data;
@@ -191,14 +192,16 @@ DEVOCIONAL:
       const imgResponse = await fetch(imageUrl);
       const contentType = imgResponse.headers.get("content-type") || "";
       
-      // Verificamos estrictamente que Vercel nos entregue una imagen y no una página HTML de inicio de sesión
       if (!imgResponse.ok || !contentType.includes("image")) {
-        throw new Error(`Vercel bloqueó la imagen o no la encontró. Tipo devuelto: ${contentType}. Revisa la Configuración de Protección (Vercel Authentication) en tu panel.`);
+        // --- AQUÍ ESTÁ LA MEJORA ---
+        // Leemos el texto exacto del error que generó og.js para saber qué le duele
+        const textError = await imgResponse.text();
+        throw new Error(`Error interno en og.js (HTTP ${imgResponse.status}): ${textError}`);
       }
       
       imgBlob = await imgResponse.blob();
     } catch (fetchErr) {
-      throw new Error("No se pudo descargar la imagen generada: " + fetchErr.message);
+      throw new Error("Generador de imagen falló: " + fetchErr.message);
     }
 
     const formData = new FormData();
