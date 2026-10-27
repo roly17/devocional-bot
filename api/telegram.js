@@ -1,8 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { Redis } from "@upstash/redis";
 
-const redis = Redis.fromEnv();
+// Permite que la función corra más tiempo en Vercel si es necesario
+export const maxDuration = 60; 
 
+const redis = Redis.fromEnv();
 const TG_DOMAIN = "api.telegram.org";
 const TG_BASE = "https://" + TG_DOMAIN + "/bot";
 
@@ -47,7 +49,6 @@ export default async function handler(req, res) {
     const chatId = update.callback_query.message?.chat?.id;
 
     if (token) {
-      // Quitar el spinner de carga del botón en Telegram
       const cbUrl = TG_BASE + token + "/answerCallbackQuery";
       await fetch(cbUrl, {
         method: "POST",
@@ -55,7 +56,6 @@ export default async function handler(req, res) {
         body: JSON.stringify({ callback_query_id: callbackId, text: "Procesando..." }),
       });
 
-      // ACCIÓN: CONFIRMAR PUBLICACIÓN EN FACEBOOK
       if (data.startsWith("confirmar:")) {
         const draftId = data.replace("confirmar:", "");
         const rawDraft = await redis.get(draftId);
@@ -70,44 +70,46 @@ export default async function handler(req, res) {
         const fbToken = (process.env.FB_PAGE_ACCESS_TOKEN || "").trim();
 
         if (!fbPageId || !fbToken) {
-          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables <code>FB_PAGE_ID</code> o <code>FB_PAGE_ACCESS_TOKEN</code> en Vercel.", token);
+          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables <code>FB_PAGE_ID</code> o <code>FB_PAGE_ACCESS_TOKEN</code>.", token);
           return res.status(200).send("OK");
         }
 
-        await responderTelegram(chatId, "🚀 <b>Publicando en la página de Facebook de MMM Las Palmas...</b>", token);
+        await responderTelegram(chatId, "🚀 <b>Publicando en Facebook...</b>", token);
 
-        const host = req.headers.host || "devocional-bot-eosin.vercel.app";
-        const imageUrl = "https://" + host + "/api/og?titulo=" + encodeURIComponent(contenido.titulo) + "&versiculo=" + encodeURIComponent(contenido.versiculo);
+        try {
+          const host = req.headers.host || "devocional-bot-eosin.vercel.app";
+          const protocol = req.headers['x-forwarded-proto'] || 'https';
+          const imageUrl = `${protocol}://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
 
-        // Llamada a la Graph API de Meta
-        const fbUrl = "https://graph.facebook.com/v20.0/" + fbPageId + "/photos";
-        const fbRes = await fetch(fbUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: imageUrl,
-            caption: contenido.copy,
-            access_token: fbToken
-          }),
-        });
+          const fbUrl = `https://graph.facebook.com/v20.0/${fbPageId}/photos`;
+          const fbRes = await fetch(fbUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: imageUrl,
+              caption: contenido.copy,
+              access_token: fbToken
+            }),
+          });
 
-        const fbData = await fbRes.json();
+          const fbData = await fbRes.json();
 
-        if (fbData.id || fbData.post_id) {
-          // Eliminar el borrador de Redis tras publicar con éxito
-          await redis.del(draftId);
-          const postId = fbData.post_id || fbData.id;
-          await responderTelegram(chatId, "🎉 <b>¡PUBLICACIÓN EXITOSA!</b>\n\nEl devocional ya está visible en la página de Facebook.\n🆔 <b>Post ID:</b> <code>" + postId + "</code>", token);
-        } else {
-          const fbError = fbData.error ? fbData.error.message : "Error desconocido";
-          await responderTelegram(chatId, "🚨 <b>Error al publicar en Facebook:</b>\n<code>" + escapeHtml(fbError) + "</code>", token);
+          if (fbData.id || fbData.post_id) {
+            await redis.del(draftId);
+            const postId = fbData.post_id || fbData.id;
+            await responderTelegram(chatId, `🎉 <b>¡PUBLICACIÓN EXITOSA!</b>\n\n🆔 <b>Post ID:</b> <code>${postId}</code>`, token);
+          } else {
+            const fbError = fbData.error ? fbData.error.message : "Error desconocido";
+            await responderTelegram(chatId, `🚨 <b>Error de Facebook:</b>\n<code>${escapeHtml(fbError)}</code>`, token);
+          }
+        } catch (fbErr) {
+          await responderTelegram(chatId, `🚨 <b>Error de red al conectar con Facebook:</b>\n<code>${escapeHtml(fbErr.message)}</code>`, token);
         }
 
-      // ACCIÓN: CANCELAR
       } else if (data.startsWith("cancelar:")) {
         const draftId = data.replace("cancelar:", "");
         await redis.del(draftId);
-        await responderTelegram(chatId, "🗑️ <b>Publicación cancelada.</b> El borrador ha sido eliminado.", token);
+        await responderTelegram(chatId, "🗑️ <b>Publicación cancelada.</b>", token);
       }
     }
     return res.status(200).send("OK");
@@ -117,39 +119,36 @@ export default async function handler(req, res) {
   const text = update.message?.text;
   const chatId = update.message?.chat?.id;
 
-  if (!chatId) return res.status(200).send("OK");
-
-  if (!text) {
-    await responderTelegram(chatId, "📌 Por favor envíame el <b>texto</b> de un devocional diario para procesarlo.", token);
-    return res.status(200).send("OK");
-  }
-
-  if (!token) return res.status(200).send("OK");
+  if (!chatId || !text || !token) return res.status(200).send("OK");
 
   try {
-    await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Inteligencia Artificial...</b>", token);
+    await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Gemini...</b>", token);
 
-    const ai = new GoogleGenAI({});
-    const prompt = 'Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:\n\n' +
-      '- "titulo": título corto y llamativo (máx 6 palabras).\n' +
-      '- "versiculo": la cita bíblica principal del texto. OBLIGATORIO: La cita debe ser extraída EXACTAMENTE y textualmente de la Biblia versión Reina Valera 1960 (RVR1960).\n' +
-      '- "copy": texto para el post de Facebook (3-4 líneas, tono cálido, que invite a leer y reflexionar).\n' +
-      'Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:\n' +
-      '1. Un hashtag sobre el tema principal del devocional (ej. #Fe, #Esperanza).\n' +
-      '2. #MMMLasPalmas\n' +
-      '3. #MMM\n\n' +
-      'DEVOCIONAL:\n"""' + text + '"""';
+    // Inicialización correcta del nuevo SDK de Google
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const prompt = `Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
 
-    const interaction = await ai.interactions.create({
-      model: "gemini-3.6-flash",
-      input: prompt,
-      response_format: {
-        type: "text",
-        mime_type: "application/json"
+- "titulo": título corto y llamativo (máx 6 palabras).
+- "versiculo": la cita bíblica principal del texto. OBLIGATORIO: Extraída textualmente de la Biblia versión Reina Valera 1960 (RVR1960).
+- "copy": texto para el post de Facebook (3-4 líneas, tono cálido).
+Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:
+1. Un hashtag sobre el tema principal del devocional (ej. #Fe, #Esperanza).
+2. #MMMLasPalmas
+3. #MMM
+
+DEVOCIONAL:
+"""${text}"""`;
+
+    // Método real del SDK actual
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash", // Modelo válido, ultra rápido y preciso
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
       }
     });
 
-    let raw = interaction.output_text.trim();
+    let raw = response.text.trim();
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
@@ -157,12 +156,11 @@ export default async function handler(req, res) {
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
     const host = req.headers.host || "devocional-bot-eosin.vercel.app";
-    const imageUrl = "https://" + host + "/api/og?titulo=" + encodeURIComponent(contenido.titulo) + "&versiculo=" + encodeURIComponent(contenido.versiculo);
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const imageUrl = `${protocol}://${host}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
 
     const sendPhotoUrl = TG_BASE + token + "/sendPhoto";
-    const captionText = "📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n" +
-      "✍️ <b>Texto para Facebook:</b>\n" + escapeHtml(contenido.copy) + "\n\n" +
-      "💾 <i>ID: " + escapeHtml(draftId) + "</i>";
+    const captionText = `📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n✍️ <b>Texto para Facebook:</b>\n${escapeHtml(contenido.copy)}\n\n💾 <i>ID: ${escapeHtml(draftId)}</i>`;
 
     const resTelegram = await fetch(sendPhotoUrl, {
       method: "POST",
@@ -186,16 +184,13 @@ export default async function handler(req, res) {
     const dataTelegram = await resTelegram.json();
 
     if (!dataTelegram.ok) {
-      const fallbackMsg = "⚠️ <b>No se pudo adjuntar la foto directamente.</b> (" + escapeHtml(dataTelegram.description) + ")\n\n" +
-        "📌 <b>" + escapeHtml(contenido.titulo) + "</b>\n📖 \"" + escapeHtml(contenido.versiculo) + "\"\n\n✍️ " + escapeHtml(contenido.copy) + "\n\n" +
-        "🖼️ <a href=\"" + imageUrl + "\">Abre tu imagen generada aquí</a>";
-      
+      const fallbackMsg = `⚠️ <b>No se pudo adjuntar la foto.</b> (${escapeHtml(dataTelegram.description)})\n\n📌 <b>${escapeHtml(contenido.titulo)}</b>\n📖 "${escapeHtml(contenido.versiculo)}"\n\n✍️ ${escapeHtml(contenido.copy)}\n\n🖼️ <a href="${imageUrl}">Abre tu imagen generada aquí</a>`;
       await responderTelegram(chatId, fallbackMsg, token);
     }
 
   } catch (err) {
     console.error("❌ Error en el proceso:", err);
-    await responderTelegram(chatId, "🚨 <b>Error en el servidor:</b>\n<code>" + escapeHtml(err.message) + "</code>", token);
+    await responderTelegram(chatId, `🚨 <b>Error en el servidor:</b>\n<code>${escapeHtml(err.message)}</code>`, token);
   }
 
   return res.status(200).send("OK");
