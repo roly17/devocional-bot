@@ -1,20 +1,21 @@
 import { ImageResponse } from '@vercel/og';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 export default async function handler(req, res) {
   try {
-    // 1. Obtener parámetros (Vercel Serverless usa req.query)
     const titulo = req.query?.titulo || 'DEVOCIONAL DIARIO';
     const versiculo = req.query?.versiculo || '';
 
-    // Obtener el dominio actual para construir rutas absolutas
-    const host = req.headers['x-forwarded-host'] || req.headers.host || 'devocional-bot-eosin.vercel.app';
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const baseUrl = `${protocol}://${host}`;
+    // 1. LEER IMÁGENES DIRECTAMENTE DEL DISCO DURO (Sin internet / Sin bloqueos)
+    const bgPath = join(process.cwd(), 'public', 'fondo.png');
+    const logoPath = join(process.cwd(), 'public', 'logo.png');
 
-    const bgUrl = `${baseUrl}/fondo.png`;
-    const logoUrl = `${baseUrl}/logo.png`;
+    // Convertirlas a código Base64 para inyectarlas directamente en el generador
+    const bgBase64 = `data:image/png;base64,${readFileSync(bgPath).toString('base64')}`;
+    const logoBase64 = `data:image/png;base64,${readFileSync(logoPath).toString('base64')}`;
 
-    // 2. Estructura visual en Objetos JS (Sin JSX para evitar errores)
+    // 2. Estructura visual en Objetos JS
     const element = {
       type: 'div',
       props: {
@@ -26,14 +27,14 @@ export default async function handler(req, res) {
           justifyContent: 'space-between',
           alignItems: 'center',
           padding: '60px 50px',
-          backgroundImage: `url(${bgUrl})`,
+          backgroundImage: `url(${bgBase64})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           fontFamily: 'sans-serif',
           boxSizing: 'border-box',
         },
         children: [
-          // LOGO SUPERIOR
+          // LOGO SUPERIOR IZQUIERDO
           {
             type: 'div',
             props: {
@@ -41,12 +42,12 @@ export default async function handler(req, res) {
               children: [
                 {
                   type: 'img',
-                  props: { src: logoUrl, alt: 'Logo MMM', style: { width: '140px', height: '140px', objectFit: 'contain' } },
+                  props: { src: logoBase64, style: { width: '140px', height: '140px', objectFit: 'contain' } },
                 },
               ],
             },
           },
-          // CUADRO CENTRAL
+          // CUADRO CENTRAL DE TEXTO (Título + Versículo)
           {
             type: 'div',
             props: {
@@ -66,7 +67,7 @@ export default async function handler(req, res) {
               ].filter(Boolean),
             },
           },
-          // FIRMA
+          // FIRMA INFERIOR DERECHA
           {
             type: 'div',
             props: {
@@ -83,13 +84,13 @@ export default async function handler(req, res) {
       },
     };
 
-    // 3. Crear imagen nativa
+    // 3. Crear la respuesta de imagen (Cuadrada 1080x1080)
     const imageResponse = new ImageResponse(element, {
       width: 1080,
       height: 1080,
     });
 
-    // 4. Convertirla a Buffer para enviarla mediante Node.js
+    // 4. Convertir a Buffer y enviar
     const arrayBuffer = await imageResponse.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
