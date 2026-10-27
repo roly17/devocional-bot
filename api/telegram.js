@@ -1,7 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { Redis } from "@upstash/redis";
 
-// Permite que la función corra más tiempo en Vercel si es necesario
 export const maxDuration = 60; 
 
 const redis = Redis.fromEnv();
@@ -124,7 +123,7 @@ export default async function handler(req, res) {
   try {
     await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Gemini...</b>", token);
 
-    // Inicialización correcta del nuevo SDK de Google
+    // Inicializamos con tu API KEY de AI Studio
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const prompt = `Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
 
@@ -139,16 +138,18 @@ Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:
 DEVOCIONAL:
 """${text}"""`;
 
-    // Método real del SDK actual
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash", // Modelo válido, ultra rápido y preciso
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
+    // SOLUCIÓN: Usamos la Interactions API requerida por Google y el modelo 3.8-flash
+    const interaction = await ai.interactions.create({
+      model: "gemini-3.8-flash",
+      input: prompt,
+      response_format: {
+        type: "text",
+        mime_type: "application/json"
       }
     });
 
-    let raw = response.text.trim();
+    // Extraemos la respuesta del objeto "interaction"
+    let raw = interaction.output_text.trim();
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
