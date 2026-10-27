@@ -10,6 +10,8 @@ const redis = new Redis({
 
 const TG_DOMAIN = "api.telegram.org";
 const TG_BASE = "https://" + TG_DOMAIN + "/bot";
+// Fijamos tu dominio oficial en producción para evitar URLs de prueba bloqueadas
+const PROJECT_DOMAIN = "devocional-bot-eosin.vercel.app"; 
 
 function escapeHtml(text) {
   if (!text) return "";
@@ -48,16 +50,11 @@ export default async function handler(req, res) {
   // --- SISTEMA ANTI-DUPLICADOS ---
   if (update.update_id) {
     const isDuplicate = await redis.get(`update_${update.update_id}`);
-    if (isDuplicate) {
-      return res.status(200).send("OK");
-    }
+    if (isDuplicate) return res.status(200).send("OK");
     await redis.set(`update_${update.update_id}`, "procesado", { ex: 600 });
   }
 
-  // --- DETECCIÓN DINÁMICA DEL DOMINIO REAL DE VERCEL ---
-  let host = process.env.VERCEL_URL || req.headers['x-forwarded-host'] || req.headers.host;
-  if (!host) host = "devocional-bot-eosin.vercel.app";
-  const baseUrl = host.startsWith('http') ? host : `https://${host}`;
+  const baseUrl = `https://${PROJECT_DOMAIN}`;
 
   // 1. MANEJO DE BOTONES (Callback Queries)
   if (update.callback_query) {
@@ -87,7 +84,7 @@ export default async function handler(req, res) {
         const fbToken = (process.env.FB_PAGE_ACCESS_TOKEN || "").trim();
 
         if (!fbPageId || !fbToken) {
-          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables en Vercel.", token);
+          await responderTelegram(chatId, "🚨 <b>Error:</b> Faltan las variables de Facebook en Vercel.", token);
           return res.status(200).send("OK");
         }
 
@@ -118,7 +115,7 @@ export default async function handler(req, res) {
             await responderTelegram(chatId, `🚨 <b>Error de Facebook:</b>\n<code>${escapeHtml(fbError)}</code>`, token);
           }
         } catch (fbErr) {
-          await responderTelegram(chatId, `🚨 <b>Error de red al conectar con Facebook:</b>\n<code>${escapeHtml(fbErr.message)}</code>`, token);
+          await responderTelegram(chatId, `🚨 <b>Error al conectar con Facebook:</b>\n<code>${escapeHtml(fbErr.message)}</code>`, token);
         }
 
       } else if (data.startsWith("cancelar:")) {
@@ -189,18 +186,19 @@ DEVOCIONAL:
     const imageUrl = `${baseUrl}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
     const captionText = `📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n✍️ <b>Texto para Facebook:</b>\n${escapeHtml(contenido.copy)}\n\n💾 <i>ID: ${escapeHtml(draftId)}</i>`;
 
-    // --- SOLUCIÓN: Descarga nativa con Extractor de Errores ---
     let imgBlob;
     try {
       const imgResponse = await fetch(imageUrl);
-      if (!imgResponse.ok) {
-        // Extraemos el detalle textual del error (para no ver solo "HTTP 500")
-        const textError = await imgResponse.text();
-        throw new Error(`HTTP ${imgResponse.status} - Detalles: ${textError}`);
+      const contentType = imgResponse.headers.get("content-type") || "";
+      
+      // Verificamos estrictamente que Vercel nos entregue una imagen y no una página HTML de inicio de sesión
+      if (!imgResponse.ok || !contentType.includes("image")) {
+        throw new Error(`Vercel bloqueó la imagen o no la encontró. Tipo devuelto: ${contentType}. Revisa la Configuración de Protección (Vercel Authentication) en tu panel.`);
       }
+      
       imgBlob = await imgResponse.blob();
     } catch (fetchErr) {
-      throw new Error(`Fallo en el generador OG interno (${imageUrl}): ` + fetchErr.message);
+      throw new Error("No se pudo descargar la imagen generada: " + fetchErr.message);
     }
 
     const formData = new FormData();
