@@ -1,21 +1,20 @@
 import { ImageResponse } from '@vercel/og';
 
-// Esto es fundamental para que Vercel procese la imagen correctamente y rápido
-export const config = {
-  runtime: 'edge',
-};
-
-export default async function handler(req) {
+export default async function handler(req, res) {
   try {
-    const { searchParams, protocol, host } = new URL(req.url);
-    const titulo = searchParams.get('titulo') || 'DEVOCIONAL DIARIO';
-    const versiculo = searchParams.get('versiculo') || '';
+    // 1. Obtener parámetros (Vercel Serverless usa req.query)
+    const titulo = req.query?.titulo || 'DEVOCIONAL DIARIO';
+    const versiculo = req.query?.versiculo || '';
 
-    // Rutas absolutas
-    const baseUrl = `${protocol}//${host}`;
+    // Obtener el dominio actual para construir rutas absolutas
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'devocional-bot-eosin.vercel.app';
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const baseUrl = `${protocol}://${host}`;
+
     const bgUrl = `${baseUrl}/fondo.png`;
     const logoUrl = `${baseUrl}/logo.png`;
 
+    // 2. Estructura visual en Objetos JS (Sin JSX para evitar errores)
     const element = {
       type: 'div',
       props: {
@@ -84,13 +83,22 @@ export default async function handler(req) {
       },
     };
 
-    // La respuesta en el entorno Edge es directa, sin usar Buffers de Node
-    return new ImageResponse(element, {
+    // 3. Crear imagen nativa
+    const imageResponse = new ImageResponse(element, {
       width: 1080,
       height: 1080,
     });
+
+    // 4. Convertirla a Buffer para enviarla mediante Node.js
+    const arrayBuffer = await imageResponse.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.status(200).send(buffer);
+    
   } catch (e) {
     console.error('Error en og.js:', e);
-    return new Response(`Error generando la imagen: ${e.message}`, { status: 500 });
+    return res.status(500).send(`Error generando la imagen: ${e.message}`);
   }
 }
