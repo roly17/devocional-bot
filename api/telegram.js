@@ -3,7 +3,6 @@ import { Redis } from "@upstash/redis";
 
 export const maxDuration = 60; 
 
-// Inicializamos Redis asegurando las credenciales correctas
 const redis = new Redis({
   url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -11,9 +10,6 @@ const redis = new Redis({
 
 const TG_DOMAIN = "api.telegram.org";
 const TG_BASE = "https://" + TG_DOMAIN + "/bot";
-
-// Fijamos tu dominio para evitar rutas rotas en el entorno interno de Vercel
-const PROJECT_DOMAIN = "devocional-bot-eosin.vercel.app"; 
 
 function escapeHtml(text) {
   if (!text) return "";
@@ -58,6 +54,11 @@ export default async function handler(req, res) {
     await redis.set(`update_${update.update_id}`, "procesado", { ex: 600 });
   }
 
+  // --- DETECCIÓN DINÁMICA DEL DOMINIO REAL DE VERCEL ---
+  let host = process.env.VERCEL_URL || req.headers['x-forwarded-host'] || req.headers.host;
+  if (!host) host = "devocional-bot-eosin.vercel.app";
+  const baseUrl = host.startsWith('http') ? host : `https://${host}`;
+
   // 1. MANEJO DE BOTONES (Callback Queries)
   if (update.callback_query) {
     const callbackId = update.callback_query.id;
@@ -93,7 +94,7 @@ export default async function handler(req, res) {
         await responderTelegram(chatId, "🚀 <b>Publicando en Facebook...</b>", token);
 
         try {
-          const imageUrl = `https://${PROJECT_DOMAIN}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
+          const imageUrl = `${baseUrl}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
           const fbUrl = `https://graph.facebook.com/v20.0/${fbPageId}/photos`;
           
           const fbRes = await fetch(fbUrl, {
@@ -185,20 +186,23 @@ DEVOCIONAL:
     const draftId = "draft_" + Date.now();
     await redis.set(draftId, JSON.stringify(contenido), { ex: 3600 });
 
-    const imageUrl = `https://${PROJECT_DOMAIN}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
+    const imageUrl = `${baseUrl}/api/og?titulo=${encodeURIComponent(contenido.titulo)}&versiculo=${encodeURIComponent(contenido.versiculo)}`;
     const captionText = `📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n✍️ <b>Texto para Facebook:</b>\n${escapeHtml(contenido.copy)}\n\n💾 <i>ID: ${escapeHtml(draftId)}</i>`;
 
-    // SOLUCIÓN: El bot descarga la imagen localmente primero para evadir los límites de tiempo de Telegram
+    // --- SOLUCIÓN: Descarga nativa con Extractor de Errores ---
     let imgBlob;
     try {
       const imgResponse = await fetch(imageUrl);
-      if (!imgResponse.ok) throw new Error(`HTTP ${imgResponse.status}`);
+      if (!imgResponse.ok) {
+        // Extraemos el detalle textual del error (para no ver solo "HTTP 500")
+        const textError = await imgResponse.text();
+        throw new Error(`HTTP ${imgResponse.status} - Detalles: ${textError}`);
+      }
       imgBlob = await imgResponse.blob();
     } catch (fetchErr) {
-      throw new Error("No se pudo generar la imagen local: " + fetchErr.message);
+      throw new Error(`Fallo en el generador OG interno (${imageUrl}): ` + fetchErr.message);
     }
 
-    // Construimos un formulario nativo para enviarle el archivo físico a Telegram
     const formData = new FormData();
     formData.append("chat_id", chatId);
     formData.append("photo", imgBlob, "devocional.png");
