@@ -1,7 +1,8 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 
-export const maxDuration = 60;
+// Aprovechamos el límite completo de tu contenedor en Vercel
+export const maxDuration = 300;
 
 const TG_BASE = "https://api.telegram.org/bot";
 const PROJECT_DOMAIN = "devocional-bot-eosin.vercel.app";
@@ -47,9 +48,9 @@ async function obtenerRedis() {
 async function obtenerFuentes() {
   if (cachedFonts) return cachedFonts;
   const [reg, bold, italic] = await Promise.all([
-    fetch("https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/roboto-latin-400-normal.woff", { signal: AbortSignal.timeout(8000) }).then((r) => r.arrayBuffer()),
-    fetch("https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/roboto-latin-700-normal.woff", { signal: AbortSignal.timeout(8000) }).then((r) => r.arrayBuffer()),
-    fetch("https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/roboto-latin-500-italic.woff", { signal: AbortSignal.timeout(8000) }).then((r) => r.arrayBuffer()),
+    fetch("https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/roboto-latin-400-normal.woff", { signal: AbortSignal.timeout(10000) }).then((r) => r.arrayBuffer()),
+    fetch("https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/roboto-latin-700-normal.woff", { signal: AbortSignal.timeout(10000) }).then((r) => r.arrayBuffer()),
+    fetch("https://cdn.jsdelivr.net/npm/@fontsource/roboto@5.0.8/files/roboto-latin-500-italic.woff", { signal: AbortSignal.timeout(10000) }).then((r) => r.arrayBuffer()),
   ]);
   cachedFonts = [
     { name: "Roboto", data: reg, weight: 400, style: "normal" },
@@ -64,24 +65,24 @@ async function cargarImagenBase64(nombreArchivo, host) {
     const filePath = join(process.cwd(), "public", nombreArchivo);
     return `data:image/png;base64,${readFileSync(filePath).toString("base64")}`;
   } catch {
-    const res = await fetch(`https://${host}/${nombreArchivo}`, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`https://${host}/${nombreArchivo}`, { signal: AbortSignal.timeout(10000) });
     if (!res.ok) throw new Error(`No se pudo cargar ${nombreArchivo} (HTTP ${res.status})`);
     const arrayBuffer = await res.arrayBuffer();
     return `data:image/png;base64,${Buffer.from(arrayBuffer).toString("base64")}`;
   }
 }
 
-async function crearImagenLocal(titulo, versiculo, host) {
+async function crearImagenLocal(titulo, versiculo, host, recursosPrecargados = null) {
   const satoriModule = await import("satori");
   const satori = satoriModule.default || satoriModule;
   const resvgModule = await import("@resvg/resvg-js");
   const Resvg = resvgModule.Resvg || resvgModule.default?.Resvg;
 
-  const [fonts, bgBase64, logoBase64] = await Promise.all([
+  const [fonts, bgBase64, logoBase64] = recursosPrecargados || (await Promise.all([
     obtenerFuentes(),
     cargarImagenBase64("fondo.png", host),
     cargarImagenBase64("logo.png", host),
-  ]);
+  ]));
 
   const element = {
     type: "div",
@@ -211,7 +212,7 @@ export default async function handler(req, res) {
 
           await responderTelegram(chatId, "🚀 <b>Publicando en Facebook...</b>", token);
 
-          const imgBlob = await withTimeout(crearImagenLocal(contenido.titulo, contenido.versiculo, host), 15000, "Dibujado FB");
+          const imgBlob = await withTimeout(crearImagenLocal(contenido.titulo, contenido.versiculo, host), 20000, "Dibujado FB");
 
           const fbForm = new FormData();
           fbForm.append("access_token", fbToken);
@@ -221,7 +222,7 @@ export default async function handler(req, res) {
           const fbRes = await fetch(`https://graph.facebook.com/v20.0/${fbPageId}/photos`, {
             method: "POST",
             body: fbForm,
-            signal: AbortSignal.timeout(20000),
+            signal: AbortSignal.timeout(25000),
           });
 
           const fbData = await fbRes.json();
@@ -243,8 +244,14 @@ export default async function handler(req, res) {
     const text = update.message?.text;
     if (!chatId || !text || !token) return res.status(200).send("OK");
 
-    // Enviamos el mensaje ANTES de cargar Gemini o las librerías gráficas
     await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Gemini...</b>", token);
+
+    // Precargamos fuentes e imágenes en segundo plano mientras Gemini piensa
+    const promesaRecursos = Promise.all([
+      obtenerFuentes(),
+      cargarImagenBase64("fondo.png", host),
+      cargarImagenBase64("logo.png", host),
+    ]);
 
     const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -260,17 +267,38 @@ Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:
 DEVOCIONAL:
 """${text}"""`;
 
-    const interaction = await withTimeout(
-      ai.interactions.create({
-        model: "gemini-3.8-flash",
-        input: prompt,
-        response_format: { type: "text", mime_type: "application/json" },
-      }),
-      25000,
-      "Llamada a Gemini API"
-    );
+    let raw = "";
+    let intentos = 2;
+    let exito = false;
+    let ultimoError = null;
 
-    let raw = interaction.output_text.trim();
+    for (let i = 0; i < intentos; i++) {
+      try {
+        // Damos hasta 120 segundos de margen para que Gemini complete su respuesta sin cortarlo
+        const interaction = await withTimeout(
+          ai.interactions.create({
+            model: "gemini-3.8-flash",
+            input: prompt,
+            response_format: { type: "text", mime_type: "application/json" },
+          }),
+          120000,
+          "Llamada a Gemini API"
+        );
+        raw = interaction.output_text.trim();
+        exito = true;
+        break;
+      } catch (err) {
+        ultimoError = err;
+        if (err.message && (err.message.includes("503") || err.message.includes("Tiempo agotado"))) {
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+        } else {
+          break;
+        }
+      }
+    }
+
+    if (!exito) throw ultimoError;
+
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
@@ -279,9 +307,10 @@ DEVOCIONAL:
 
     const captionText = `📌 <b>BORRADOR DE PUBLICACIÓN</b>\n\n✍️ <b>Texto para Facebook:</b>\n${escapeHtml(contenido.copy)}\n\n💾 <i>ID: ${escapeHtml(draftId)}</i>`;
 
+    const recursosListos = await promesaRecursos;
     const imgBlob = await withTimeout(
-      crearImagenLocal(contenido.titulo, contenido.versiculo, host),
-      15000,
+      crearImagenLocal(contenido.titulo, contenido.versiculo, host, recursosListos),
+      20000,
       "Generación de imagen Satori/Resvg"
     );
 
@@ -303,7 +332,7 @@ DEVOCIONAL:
     const resTelegram = await fetch(TG_BASE + token + "/sendPhoto", {
       method: "POST",
       body: formData,
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(20000),
     });
 
     const dataTelegram = await resTelegram.json();
