@@ -1,7 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 
-// Aprovechamos el límite completo de tu contenedor en Vercel
 export const maxDuration = 300;
 
 const TG_BASE = "https://api.telegram.org/bot";
@@ -88,34 +87,13 @@ async function crearImagenLocal(titulo, versiculo, host, recursosPrecargados = n
     type: "div",
     props: {
       style: {
-        height: "1080px",
-        width: "1080px",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "60px 50px",
-        fontFamily: "Roboto",
-        position: "relative",
-        boxSizing: "border-box",
+        height: "1080px", width: "1080px", display: "flex", flexDirection: "column",
+        justifyContent: "space-between", alignItems: "center", padding: "60px 50px",
+        fontFamily: "Roboto", position: "relative", boxSizing: "border-box",
       },
       children: [
-        {
-          type: "img",
-          props: {
-            src: bgBase64,
-            width: 1080,
-            height: 1080,
-            style: { position: "absolute", top: 0, left: 0, width: "1080px", height: "1080px", objectFit: "cover" },
-          },
-        },
-        {
-          type: "div",
-          props: {
-            style: { display: "flex", width: "100%", justifyContent: "flex-start", alignItems: "center" },
-            children: [{ type: "img", props: { src: logoBase64, width: 140, height: 140, style: { width: "140px", height: "140px", objectFit: "contain" } } }],
-          },
-        },
+        { type: "img", props: { src: bgBase64, width: 1080, height: 1080, style: { position: "absolute", top: 0, left: 0, width: "1080px", height: "1080px", objectFit: "cover" } } },
+        { type: "div", props: { style: { display: "flex", width: "100%", justifyContent: "flex-start", alignItems: "center" }, children: [{ type: "img", props: { src: logoBase64, width: 140, height: 140, style: { width: "140px", height: "140px", objectFit: "contain" } } }] } },
         {
           type: "div",
           props: {
@@ -124,32 +102,12 @@ async function crearImagenLocal(titulo, versiculo, host, recursosPrecargados = n
               width: "90%", padding: "35px 30px", borderRadius: "24px", backgroundColor: "rgba(0, 0, 0, 0.55)", border: "1px solid rgba(255, 255, 255, 0.25)",
             },
             children: [
-              {
-                type: "h1",
-                props: {
-                  style: { fontSize: "48px", fontWeight: 700, color: "#FFFFFF", margin: "0 0 18px 0", textTransform: "uppercase" },
-                  children: titulo,
-                },
-              },
-              versiculo
-                ? {
-                    type: "p",
-                    props: {
-                      style: { fontSize: "28px", fontWeight: 500, color: "#F0F0F0", fontStyle: "italic", margin: "0", lineHeight: "1.4" },
-                      children: `"${versiculo}"`,
-                    },
-                  }
-                : null,
+              { type: "h1", props: { style: { fontSize: "48px", fontWeight: 700, color: "#FFFFFF", margin: "0 0 18px 0", textTransform: "uppercase" }, children: titulo } },
+              versiculo ? { type: "p", props: { style: { fontSize: "28px", fontWeight: 500, color: "#F0F0F0", fontStyle: "italic", margin: "0", lineHeight: "1.4" }, children: `"${versiculo}"` } } : null,
             ].filter(Boolean),
           },
         },
-        {
-          type: "div",
-          props: {
-            style: { display: "flex", width: "100%", justifyContent: "flex-end", alignItems: "center" },
-            children: [{ type: "span", props: { style: { fontSize: "28px", fontWeight: 700, color: "#FFFFFF", letterSpacing: "2px" }, children: "MMM LAS PALMAS" } }],
-          },
-        },
+        { type: "div", props: { style: { display: "flex", width: "100%", justifyContent: "flex-end", alignItems: "center" }, children: [{ type: "span", props: { style: { fontSize: "28px", fontWeight: 700, color: "#FFFFFF", letterSpacing: "2px" }, children: "MMM LAS PALMAS" } }] } },
       ],
     },
   };
@@ -161,9 +119,7 @@ async function crearImagenLocal(titulo, versiculo, host, recursosPrecargados = n
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(200).send("Bot activo y listo.");
-  }
+  if (req.method !== "POST") return res.status(200).send("Bot activo y listo.");
 
   const token = (process.env.BOT_TOKEN || "").trim();
   const update = req.body || {};
@@ -187,8 +143,7 @@ export default async function handler(req, res) {
 
       if (token) {
         await fetch(TG_BASE + token + "/answerCallbackQuery", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ callback_query_id: callbackId, text: "Procesando..." }),
         });
 
@@ -220,9 +175,7 @@ export default async function handler(req, res) {
           fbForm.append("source", imgBlob, "devocional.png");
 
           const fbRes = await fetch(`https://graph.facebook.com/v20.0/${fbPageId}/photos`, {
-            method: "POST",
-            body: fbForm,
-            signal: AbortSignal.timeout(25000),
+            method: "POST", body: fbForm, signal: AbortSignal.timeout(25000),
           });
 
           const fbData = await fbRes.json();
@@ -246,15 +199,12 @@ export default async function handler(req, res) {
 
     await responderTelegram(chatId, "⏳ <b>Procesando tu devocional con Gemini...</b>", token);
 
-    // Precargamos fuentes e imágenes en segundo plano mientras Gemini piensa
+    // Precargamos los archivos de diseño en paralelo para ahorrar tiempo
     const promesaRecursos = Promise.all([
       obtenerFuentes(),
       cargarImagenBase64("fondo.png", host),
       cargarImagenBase64("logo.png", host),
     ]);
-
-    const { GoogleGenAI } = await import("@google/genai");
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
     const prompt = `Eres el community manager experto de la iglesia cristiana MMM Las Palmas. A partir del siguiente devocional diario, genera un JSON con exactamente estas claves:
 - "titulo": título corto y llamativo (máx 6 palabras).
@@ -267,38 +217,34 @@ Al final del copy, debes incluir EXACTAMENTE 3 hashtags en este orden:
 DEVOCIONAL:
 """${text}"""`;
 
-    let raw = "";
-    let intentos = 2;
-    let exito = false;
-    let ultimoError = null;
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) throw new Error("Falta la variable GEMINI_API_KEY en Vercel.");
 
-    for (let i = 0; i < intentos; i++) {
-      try {
-        // Damos hasta 120 segundos de margen para que Gemini complete su respuesta sin cortarlo
-        const interaction = await withTimeout(
-          ai.interactions.create({
-            model: "gemini-3.8-flash",
-            input: prompt,
-            response_format: { type: "text", mime_type: "application/json" },
-          }),
-          120000,
-          "Llamada a Gemini API"
-        );
-        raw = interaction.output_text.trim();
-        exito = true;
-        break;
-      } catch (err) {
-        ultimoError = err;
-        if (err.message && (err.message.includes("503") || err.message.includes("Tiempo agotado"))) {
-          await new Promise((resolve) => setTimeout(resolve, 2500));
-        } else {
-          break;
-        }
-      }
+    // 🚀 LA MAGIA: Petición nativa directa al modelo ultra-estable (gemini-1.5-flash)
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+    
+    const geminiRes = await fetch(geminiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" }
+      }),
+      signal: AbortSignal.timeout(30000) // Le damos 30 segundos justos
+    });
+
+    if (!geminiRes.ok) {
+      const errorApi = await geminiRes.text();
+      throw new Error(`Google API (HTTP ${geminiRes.status}): ${errorApi}`);
     }
 
-    if (!exito) throw ultimoError;
+    const dataGemini = await geminiRes.json();
+    
+    if (!dataGemini.candidates || !dataGemini.candidates[0]) {
+      throw new Error("Google devolvió una respuesta vacía o inesperada.");
+    }
 
+    let raw = dataGemini.candidates[0].content.parts[0].text.trim();
     raw = raw.replace(/^```json/i, "").replace(/^```/, "").replace(/```$/, "").trim();
     const contenido = JSON.parse(raw);
 
@@ -330,13 +276,10 @@ DEVOCIONAL:
     );
 
     const resTelegram = await fetch(TG_BASE + token + "/sendPhoto", {
-      method: "POST",
-      body: formData,
-      signal: AbortSignal.timeout(20000),
+      method: "POST", body: formData, signal: AbortSignal.timeout(20000),
     });
 
     const dataTelegram = await resTelegram.json();
-
     if (!dataTelegram.ok) {
       await responderTelegram(chatId, `⚠️ <b>No se adjuntó la foto:</b> ${escapeHtml(dataTelegram.description)}\n\n📌 <b>${escapeHtml(contenido.titulo)}</b>\n📖 "${escapeHtml(contenido.versiculo)}"`, token);
     }
