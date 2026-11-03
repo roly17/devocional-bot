@@ -221,7 +221,7 @@ DEVOCIONAL:
     if (!geminiKey) throw new Error("Falta la variable GEMINI_API_KEY en Vercel.");
 
     // 🚀 LA MAGIA: Petición nativa directa al modelo ultra-estable (gemini-1.5-flash)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`;
     
     const geminiRes = await fetch(geminiUrl, {
       method: "POST",
