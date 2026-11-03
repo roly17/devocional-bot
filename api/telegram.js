@@ -220,7 +220,7 @@ DEVOCIONAL:
     const geminiKey = process.env.GEMINI_API_KEY;
     if (!geminiKey) throw new Error("Falta la variable GEMINI_API_KEY en Vercel.");
 
-    // 🚀 LA MAGIA: Petición nativa directa al modelo ultra-estable (gemini-1.5-flash)
+    // 🚀 LA MAGIA: Petición nativa directa al modelo ultra-estable
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${geminiKey}`;
     
     const geminiRes = await fetch(geminiUrl, {
@@ -228,9 +228,13 @@ DEVOCIONAL:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" }
+        generationConfig: { 
+          responseMimeType: "application/json",
+          temperature: 0.2,         // Hace que la IA sea directa y responda más rápido
+          maxOutputTokens: 400      // Límite de texto para que no se quede colgada pensando
+        }
       }),
-      signal: AbortSignal.timeout(30000) // Le damos 30 segundos justos
+      signal: AbortSignal.timeout(55000) // Ampliamos la paciencia a 55 segundos
     });
 
     if (!geminiRes.ok) {
